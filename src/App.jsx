@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock, Loader2, Cloud, CloudOff } from 'lucide-react';
+import { supabase } from './supabase';
 
 const SERVICIOS_CATALOGO = [
   'Lavado Full (exterior, interior y chasis)',
@@ -27,8 +28,53 @@ const EQUIPAMIENTO_CATALOGO = [
 
 const TIPOS_VEHICULO = ['Camioneta', 'Camión', 'Bus', 'Minibus', 'Automóvil', 'SUV', 'Furgón', 'Maquinaria'];
 
-const STORAGE_KEY = 'luandi-ingresos';
-const COUNTER_KEY = 'luandi-counter';
+// Convertir registro de Supabase a formato interno
+function dbToApp(row) {
+  return {
+    id: row.id,
+    n_control: row.n_control,
+    nombre_empresa: row.nombre_empresa || '',
+    patente: row.patente || '',
+    tipo_vehiculo: row.tipo_vehiculo || '',
+    marca: row.marca || '',
+    modelo: row.modelo || '',
+    kilometraje: row.kilometraje || '',
+    servicios: row.servicios || [],
+    servicios_otros: row.servicios_otros || '',
+    equipamiento: row.equipamiento || [],
+    equipamiento_otros: row.equipamiento_otros || '',
+    cliente_entrega_fecha: row.cliente_entrega_fecha || '',
+    cliente_entrega_hora: row.cliente_entrega_hora ? row.cliente_entrega_hora.slice(0, 5) : '',
+    cliente_entrega_persona: row.cliente_entrega_persona || '',
+    cliente_entrega_firma: row.cliente_entrega_firma || '',
+    luandi_recibe_fecha: row.luandi_recibe_fecha || '',
+    luandi_recibe_hora: row.luandi_recibe_hora ? row.luandi_recibe_hora.slice(0, 5) : '',
+    luandi_recibe_persona: row.luandi_recibe_persona || '',
+    luandi_entrega_fecha: row.luandi_entrega_fecha || '',
+    luandi_entrega_hora: row.luandi_entrega_hora ? row.luandi_entrega_hora.slice(0, 5) : '',
+    luandi_entrega_persona: row.luandi_entrega_persona || '',
+    cliente_recibe_fecha: row.cliente_recibe_fecha || '',
+    cliente_recibe_hora: row.cliente_recibe_hora ? row.cliente_recibe_hora.slice(0, 5) : '',
+    cliente_recibe_persona: row.cliente_recibe_persona || '',
+    cliente_recibe_firma: row.cliente_recibe_firma || '',
+    observaciones: row.observaciones || '',
+    observaciones_entrega: row.observaciones_entrega || '',
+    estado: row.estado || 'en_proceso',
+    fecha_creacion: row.fecha_creacion
+  };
+}
+
+// Convertir registro interno a formato Supabase (limpia campos vacíos para fechas/horas)
+function appToDb(data) {
+  const clean = { ...data };
+  // Convertir strings vacíos a null en campos de fecha/hora
+  const dateFields = ['cliente_entrega_fecha', 'luandi_recibe_fecha', 'luandi_entrega_fecha', 'cliente_recibe_fecha'];
+  const timeFields = ['cliente_entrega_hora', 'luandi_recibe_hora', 'luandi_entrega_hora', 'cliente_recibe_hora'];
+  [...dateFields, ...timeFields].forEach(f => {
+    if (clean[f] === '') clean[f] = null;
+  });
+  return clean;
+}
 
 function SignaturePad({ value, onChange, label }) {
   const canvasRef = useRef(null);
@@ -134,74 +180,126 @@ function SignaturePad({ value, onChange, label }) {
 export default function LuandiApp() {
   const [view, setView] = useState('home');
   const [ingresos, setIngresos] = useState([]);
-  const [counter, setCounter] = useState(5901);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [conectado, setConectado] = useState(true);
   const [selectedIngreso, setSelectedIngreso] = useState(null);
   const [filterPatente, setFilterPatente] = useState('');
   const [filterEmpresa, setFilterEmpresa] = useState('');
   const [filterEstado, setFilterEstado] = useState('todos');
   const [toast, setToast] = useState(null);
 
-  useEffect(() => {
+  // Cargar ingresos iniciales desde Supabase
+  const cargarIngresos = async () => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      const savedCounter = localStorage.getItem(COUNTER_KEY);
-      if (saved) setIngresos(JSON.parse(saved));
-      if (savedCounter) setCounter(parseInt(savedCounter));
+      const { data, error } = await supabase
+        .from('ingresos')
+        .select('*')
+        .order('fecha_creacion', { ascending: false });
+      
+      if (error) throw error;
+      setIngresos((data || []).map(dbToApp));
+      setConectado(true);
     } catch (e) {
-      console.error('Error cargando datos:', e);
+      console.error('Error cargando ingresos:', e);
+      setConectado(false);
+      showToast('Error al cargar datos. Revise su conexión.', 'error');
+    } finally {
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    cargarIngresos();
+
+    // Suscripción en tiempo real: cuando alguien crea/edita/elimina, se actualiza solo
+    const subscription = supabase
+      .channel('ingresos_changes')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'ingresos' },
+        () => { cargarIngresos(); }
+      )
+      .subscribe();
+
+    return () => { subscription.unsubscribe(); };
   }, []);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(ingresos));
-    } catch (e) {
-      console.error('Error guardando:', e);
-    }
-  }, [ingresos]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(COUNTER_KEY, counter.toString());
-    } catch (e) {
-      console.error('Error guardando contador:', e);
-    }
-  }, [counter]);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
   };
 
-  const guardarIngreso = (data) => {
-    if (data.id) {
-      setIngresos(ingresos.map(i => i.id === data.id ? data : i));
-      showToast('Registro actualizado correctamente');
-    } else {
-      const nuevo = {
-        ...data,
-        id: Date.now().toString(),
-        n_control: counter,
-        fecha_creacion: new Date().toISOString(),
-        estado: 'en_proceso'
-      };
-      setIngresos([nuevo, ...ingresos]);
-      setCounter(counter + 1);
-      showToast(`Ingreso N°${counter} registrado correctamente`);
+  // Obtener siguiente número de control desde Supabase (atómico)
+  const obtenerSiguienteNumero = async () => {
+    const { data, error } = await supabase.rpc('siguiente_n_control');
+    if (error) throw error;
+    return data;
+  };
+
+  const guardarIngreso = async (data) => {
+    setSaving(true);
+    try {
+      if (data.id) {
+        // Actualización
+        const { id, ...resto } = data;
+        const { error } = await supabase
+          .from('ingresos')
+          .update(appToDb(resto))
+          .eq('id', id);
+        if (error) throw error;
+        showToast('Registro actualizado correctamente');
+      } else {
+        // Nuevo ingreso
+        const n_control = await obtenerSiguienteNumero();
+        const nuevo = appToDb({
+          ...data,
+          n_control,
+          estado: 'en_proceso'
+        });
+        const { error } = await supabase.from('ingresos').insert(nuevo);
+        if (error) throw error;
+        showToast(`Ingreso N°${n_control} registrado correctamente`);
+      }
+      await cargarIngresos();
+      setView('historial');
+    } catch (e) {
+      console.error('Error guardando:', e);
+      showToast('Error al guardar: ' + e.message, 'error');
+    } finally {
+      setSaving(false);
     }
-    setView('historial');
   };
 
-  const cerrarEntrega = (data) => {
-    setIngresos(ingresos.map(i => i.id === data.id ? { ...data, estado: 'entregado' } : i));
-    showToast(`Entrega N°${data.n_control} registrada correctamente`);
-    setView('historial');
+  const cerrarEntrega = async (data) => {
+    setSaving(true);
+    try {
+      const { id, ...resto } = data;
+      const { error } = await supabase
+        .from('ingresos')
+        .update(appToDb({ ...resto, estado: 'entregado' }))
+        .eq('id', id);
+      if (error) throw error;
+      showToast(`Entrega N°${data.n_control} registrada correctamente`);
+      await cargarIngresos();
+      setView('historial');
+    } catch (e) {
+      console.error('Error en entrega:', e);
+      showToast('Error al registrar entrega: ' + e.message, 'error');
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const eliminarIngreso = (id) => {
-    if (confirm('¿Eliminar este registro? Esta acción no se puede deshacer.')) {
-      setIngresos(ingresos.filter(i => i.id !== id));
+  const eliminarIngreso = async (id) => {
+    if (!confirm('¿Eliminar este registro? Esta acción no se puede deshacer.')) return;
+    try {
+      const { error } = await supabase.from('ingresos').delete().eq('id', id);
+      if (error) throw error;
       showToast('Registro eliminado', 'info');
+      await cargarIngresos();
+    } catch (e) {
+      console.error('Error eliminando:', e);
+      showToast('Error al eliminar: ' + e.message, 'error');
     }
   };
 
@@ -265,6 +363,17 @@ export default function LuandiApp() {
     setTimeout(() => win.print(), 500);
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <Loader2 className="mx-auto animate-spin text-blue-700 mb-3" size={32} />
+          <p className="text-slate-600 text-sm">Cargando datos desde la nube...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
@@ -278,16 +387,22 @@ export default function LuandiApp() {
               <p className="text-xs text-slate-500 hidden sm:block">Control de Ingreso y Entrega de Vehículos</p>
             </div>
           </div>
-          {view !== 'home' && (
-            <button onClick={() => setView('home')} className="text-sm text-slate-600 hover:text-slate-900 flex items-center gap-1">
-              <ChevronLeft size={16} /> <span className="hidden sm:inline">Inicio</span>
-            </button>
-          )}
+          <div className="flex items-center gap-3">
+            <div className={`flex items-center gap-1 text-xs ${conectado ? 'text-green-600' : 'text-red-600'}`} title={conectado ? 'Conectado a la nube' : 'Sin conexión'}>
+              {conectado ? <Cloud size={14} /> : <CloudOff size={14} />}
+              <span className="hidden sm:inline">{conectado ? 'En línea' : 'Sin conexión'}</span>
+            </div>
+            {view !== 'home' && (
+              <button onClick={() => setView('home')} className="text-sm text-slate-600 hover:text-slate-900 flex items-center gap-1">
+                <ChevronLeft size={16} /> <span className="hidden sm:inline">Inicio</span>
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
       {toast && (
-        <div className={`fixed top-20 right-4 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 text-sm font-medium ${
+        <div className={`fixed top-20 right-4 z-50 px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 text-sm font-medium max-w-md ${
           toast.type === 'success' ? 'bg-green-600 text-white' :
           toast.type === 'error' ? 'bg-red-600 text-white' :
           'bg-slate-700 text-white'
@@ -295,6 +410,12 @@ export default function LuandiApp() {
           {toast.type === 'success' && <CheckCircle2 size={18} />}
           {toast.type === 'error' && <AlertCircle size={18} />}
           {toast.message}
+        </div>
+      )}
+
+      {saving && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg shadow-lg bg-blue-700 text-white text-sm flex items-center gap-2">
+          <Loader2 size={16} className="animate-spin" /> Guardando...
         </div>
       )}
 
@@ -310,9 +431,9 @@ export default function LuandiApp() {
         {view === 'nuevo' && (
           <FormularioIngreso
             ingreso={selectedIngreso}
-            counter={counter}
             onGuardar={guardarIngreso}
             onCancelar={() => setView(selectedIngreso ? 'historial' : 'home')}
+            saving={saving}
           />
         )}
         {view === 'historial' && (
@@ -346,6 +467,7 @@ export default function LuandiApp() {
             ingreso={selectedIngreso}
             onGuardar={cerrarEntrega}
             onCancelar={() => setView('historial')}
+            saving={saving}
           />
         )}
       </main>
@@ -472,7 +594,7 @@ function EstadoBadge({ estado }) {
   return <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700"><Clock size={12} /> En proceso</span>;
 }
 
-function FormularioIngreso({ ingreso, counter, onGuardar, onCancelar }) {
+function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving }) {
   const [step, setStep] = useState(1);
   const [data, setData] = useState(ingreso || {
     nombre_empresa: '',
@@ -526,7 +648,7 @@ function FormularioIngreso({ ingreso, counter, onGuardar, onCancelar }) {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl sm:text-2xl font-bold text-slate-900">
-            {ingreso ? `Editar ingreso N°${ingreso.n_control}` : `Nuevo Ingreso N°${counter}`}
+            {ingreso ? `Editar ingreso N°${ingreso.n_control}` : `Nuevo Ingreso`}
           </h2>
           <p className="text-sm text-slate-500">Complete los datos del vehículo y servicios</p>
         </div>
@@ -683,21 +805,21 @@ function FormularioIngreso({ ingreso, counter, onGuardar, onCancelar }) {
       )}
 
       <div className="flex flex-col sm:flex-row gap-2 sm:justify-between">
-        <button onClick={onCancelar} className="btn-secondary order-2 sm:order-1">Cancelar</button>
+        <button onClick={onCancelar} disabled={saving} className="btn-secondary order-2 sm:order-1 disabled:opacity-50">Cancelar</button>
         <div className="flex gap-2 order-1 sm:order-2">
-          {step > 1 && <button onClick={() => setStep(step - 1)} className="btn-secondary flex-1 sm:flex-none"><ChevronLeft size={16} /> Anterior</button>}
+          {step > 1 && <button onClick={() => setStep(step - 1)} disabled={saving} className="btn-secondary flex-1 sm:flex-none disabled:opacity-50"><ChevronLeft size={16} /> Anterior</button>}
           {step < 4 && (
             <button
               onClick={() => puedeAvanzar() && setStep(step + 1)}
-              disabled={!puedeAvanzar()}
+              disabled={!puedeAvanzar() || saving}
               className="btn-primary flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Siguiente <ChevronRight size={16} />
             </button>
           )}
           {step === 4 && (
-            <button onClick={() => onGuardar(data)} className="btn-primary flex-1 sm:flex-none">
-              <Check size={16} /> Guardar ingreso
+            <button onClick={() => onGuardar(data)} disabled={saving} className="btn-primary flex-1 sm:flex-none disabled:opacity-50">
+              {saving ? <><Loader2 size={16} className="animate-spin" /> Guardando...</> : <><Check size={16} /> Guardar ingreso</>}
             </button>
           )}
         </div>
@@ -706,7 +828,7 @@ function FormularioIngreso({ ingreso, counter, onGuardar, onCancelar }) {
   );
 }
 
-function FormularioEntrega({ ingreso, onGuardar, onCancelar }) {
+function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving }) {
   const [data, setData] = useState({
     ...ingreso,
     luandi_entrega_fecha: ingreso.luandi_entrega_fecha || new Date().toISOString().split('T')[0],
@@ -780,13 +902,13 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar }) {
       </div>
 
       <div className="flex flex-col sm:flex-row gap-2 sm:justify-between">
-        <button onClick={onCancelar} className="btn-secondary order-2 sm:order-1">Cancelar</button>
+        <button onClick={onCancelar} disabled={saving} className="btn-secondary order-2 sm:order-1 disabled:opacity-50">Cancelar</button>
         <button
           onClick={() => onGuardar(data)}
-          disabled={!puedeGuardar}
+          disabled={!puedeGuardar || saving}
           className="btn-primary order-1 sm:order-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <Check size={16} /> Confirmar entrega
+          {saving ? <><Loader2 size={16} className="animate-spin" /> Guardando...</> : <><Check size={16} /> Confirmar entrega</>}
         </button>
       </div>
     </div>
