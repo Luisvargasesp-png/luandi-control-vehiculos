@@ -980,6 +980,36 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
                           }}
                           className="mt-0.5"
                         />
+                        <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <label className="flex items-start gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={!!data.cliente_entrega_sin_firma}
+                          onChange={e => {
+                            const checked = e.target.checked;
+                            setData(prev => ({
+                              ...prev,
+                              cliente_entrega_sin_firma: checked,
+                              cliente_entrega_firma: checked ? '' : prev.cliente_entrega_firma
+                            }));
+                          }}
+                          className="mt-0.5 w-4 h-4 cursor-pointer flex-shrink-0"
+                        />
+                      <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <label className="flex items-start gap-2 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={!!data.cliente_entrega_sin_firma}
+                          onChange={e => {
+                            const checked = e.target.checked;
+                            setData(prev => ({
+                              ...prev,
+                              cliente_entrega_sin_firma: checked,
+                              cliente_entrega_firma: checked ? '' : prev.cliente_entrega_firma
+                            }));
+                          }}
+                          className="mt-0.5 w-4 h-4 cursor-pointer flex-shrink-0"
+                        />
                         <div className="text-xs text-amber-900">
                           <span className="font-medium">El cliente no firmó en el momento del ingreso</span>
                           <p className="text-amber-700 mt-0.5">Marque esta casilla solo si no fue posible obtener la firma. Deberá indicar el motivo.</p>
