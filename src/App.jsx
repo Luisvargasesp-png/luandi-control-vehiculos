@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock, Loader2, Cloud, CloudOff, FolderOpen, ArrowLeft } from 'lucide-react';
+import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock, Loader2, Cloud, CloudOff, FolderOpen, AlertTriangle } from 'lucide-react';
 import { supabase } from './supabase';
 
 const SERVICIOS_CATALOGO = [
@@ -30,7 +30,6 @@ const TIPOS_VEHICULO = ['Camioneta', 'Camión', 'Bus', 'Minibus', 'Automóvil', 
 
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-// Helper: obtener clave de período YYYY-MM
 function getPeriodoKey(fecha) {
   const d = new Date(fecha);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
@@ -59,6 +58,8 @@ function dbToApp(row) {
     cliente_entrega_hora: row.cliente_entrega_hora ? row.cliente_entrega_hora.slice(0, 5) : '',
     cliente_entrega_persona: row.cliente_entrega_persona || '',
     cliente_entrega_firma: row.cliente_entrega_firma || '',
+    cliente_entrega_sin_firma: row.cliente_entrega_sin_firma || false,
+    cliente_entrega_motivo_sin_firma: row.cliente_entrega_motivo_sin_firma || '',
     luandi_recibe_fecha: row.luandi_recibe_fecha || '',
     luandi_recibe_hora: row.luandi_recibe_hora ? row.luandi_recibe_hora.slice(0, 5) : '',
     luandi_recibe_persona: row.luandi_recibe_persona || '',
@@ -187,6 +188,28 @@ function SignaturePad({ value, onChange, label }) {
   );
 }
 
+// Modal de alerta para validaciones
+function AlertModal({ title, message, onClose }) {
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
+            <AlertTriangle className="text-amber-600" size={22} />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-bold text-slate-900 text-lg">{title}</h3>
+            <p className="text-sm text-slate-600 mt-1 whitespace-pre-wrap">{message}</p>
+          </div>
+        </div>
+        <button onClick={onClose} className="w-full btn-primary justify-center">
+          Entendido
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function LuandiApp() {
   const [view, setView] = useState('home');
   const [ingresos, setIngresos] = useState([]);
@@ -200,6 +223,7 @@ export default function LuandiApp() {
   const [periodoSeleccionado, setPeriodoSeleccionado] = useState(getPeriodoKey(new Date()));
   const [mostrarSelectorPeriodo, setMostrarSelectorPeriodo] = useState(false);
   const [toast, setToast] = useState(null);
+  const [alertModal, setAlertModal] = useState(null);
 
   const cargarIngresos = async () => {
     try {
@@ -235,6 +259,10 @@ export default function LuandiApp() {
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const showAlert = (title, message) => {
+    setAlertModal({ title, message });
   };
 
   const obtenerSiguienteNumero = async () => {
@@ -308,7 +336,6 @@ export default function LuandiApp() {
     }
   };
 
-  // Agrupar ingresos por período (YYYY-MM)
   const periodosDisponibles = (() => {
     const map = new Map();
     ingresos.forEach(i => {
@@ -320,7 +347,6 @@ export default function LuandiApp() {
       .sort((a, b) => b.key.localeCompare(a.key));
   })();
 
-  // Filtrar ingresos según período + filtros de búsqueda
   const ingresosDelPeriodo = ingresos.filter(i => getPeriodoKey(i.fecha_creacion) === periodoSeleccionado);
 
   const ingresosFiltrados = ingresosDelPeriodo.filter(i => {
@@ -425,7 +451,7 @@ export default function LuandiApp() {
     setTimeout(() => win.print(), 500);
   };
 
-  const generarPDFResumenMes = () => {
+  const generarPDFRespaldosMes = () => {
     if (ingresosDelPeriodo.length === 0) {
       showToast('No hay registros en este período para generar PDF', 'info');
       return;
@@ -435,10 +461,12 @@ export default function LuandiApp() {
       showToast('Permita ventanas emergentes para descargar el PDF', 'error');
       return;
     }
-    const html = generarHTMLResumenMes(ingresosDelPeriodo, getPeriodoLabel(periodoSeleccionado));
+    // Ordenar por número de control ascendente
+    const ordenados = [...ingresosDelPeriodo].sort((a, b) => a.n_control - b.n_control);
+    const html = generarHTMLRespaldosMes(ordenados, getPeriodoLabel(periodoSeleccionado));
     win.document.write(html);
     win.document.close();
-    setTimeout(() => win.print(), 500);
+    setTimeout(() => win.print(), 800);
   };
 
   if (loading) {
@@ -497,6 +525,10 @@ export default function LuandiApp() {
         </div>
       )}
 
+      {alertModal && (
+        <AlertModal title={alertModal.title} message={alertModal.message} onClose={() => setAlertModal(null)} />
+      )}
+
       {mostrarSelectorPeriodo && (
         <SelectorPeriodo
           periodos={periodosDisponibles}
@@ -523,6 +555,7 @@ export default function LuandiApp() {
             onGuardar={guardarIngreso}
             onCancelar={() => setView(selectedIngreso ? 'historial' : 'home')}
             saving={saving}
+            showAlert={showAlert}
           />
         )}
         {view === 'historial' && (
@@ -543,7 +576,7 @@ export default function LuandiApp() {
             onEditar={(i) => { setSelectedIngreso(i); setView('nuevo'); }}
             onEliminar={eliminarIngreso}
             onExportarPeriodo={exportarExcelPeriodo}
-            onPDFResumen={generarPDFResumenMes}
+            onPDFRespaldos={generarPDFRespaldosMes}
             onNuevo={() => { setSelectedIngreso(null); setView('nuevo'); }}
           />
         )}
@@ -561,6 +594,7 @@ export default function LuandiApp() {
             onGuardar={cerrarEntrega}
             onCancelar={() => setView('historial')}
             saving={saving}
+            showAlert={showAlert}
           />
         )}
       </main>
@@ -577,7 +611,6 @@ export default function LuandiApp() {
 }
 
 function SelectorPeriodo({ periodos, periodoActual, onSelect, onClose }) {
-  // Agrupar por año
   const porAnio = {};
   periodos.forEach(p => {
     const anio = p.key.split('-')[0];
@@ -738,7 +771,7 @@ function EstadoBadge({ estado }) {
   return <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700"><Clock size={12} /> En proceso</span>;
 }
 
-function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving }) {
+function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }) {
   const [step, setStep] = useState(1);
   const [data, setData] = useState(ingreso || {
     nombre_empresa: '',
@@ -755,6 +788,8 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving }) {
     cliente_entrega_hora: new Date().toTimeString().slice(0, 5),
     cliente_entrega_persona: '',
     cliente_entrega_firma: '',
+    cliente_entrega_sin_firma: false,
+    cliente_entrega_motivo_sin_firma: '',
     luandi_recibe_fecha: new Date().toISOString().split('T')[0],
     luandi_recibe_hora: new Date().toTimeString().slice(0, 5),
     luandi_recibe_persona: '',
@@ -778,6 +813,34 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving }) {
     if (step === 2) return true;
     if (step === 3) return data.cliente_entrega_persona && data.luandi_recibe_persona;
     return true;
+  };
+
+  // Validación antes de guardar
+  const intentarGuardar = () => {
+    // Validar firma de ingreso
+    const tieneFirma = !!data.cliente_entrega_firma;
+    const marcoSinFirma = !!data.cliente_entrega_sin_firma;
+    const tieneMotivo = !!(data.cliente_entrega_motivo_sin_firma && data.cliente_entrega_motivo_sin_firma.trim());
+
+    if (!tieneFirma && !marcoSinFirma) {
+      showAlert(
+        'Falta la firma del cliente',
+        'Por favor solicite la firma del cliente en el paso 3 (Recepción).\n\nSi el cliente no puede firmar en este momento, marque la casilla "El cliente no firmó" e indique el motivo.'
+      );
+      setStep(3);
+      return;
+    }
+
+    if (marcoSinFirma && !tieneMotivo) {
+      showAlert(
+        'Indique el motivo',
+        'Marcó que el cliente no firmó. Debe indicar el motivo por el cual no se obtuvo la firma de ingreso.'
+      );
+      setStep(3);
+      return;
+    }
+
+    onGuardar(data);
   };
 
   const steps = [
@@ -899,11 +962,60 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving }) {
                 <input type="text" value={data.cliente_entrega_persona} onChange={e => update('cliente_entrega_persona', e.target.value)} className="input" placeholder="Nombre completo de quien entrega" />
               </Field>
               <div className="sm:col-span-2">
-                <SignaturePad
-                  label="Firma del cliente (entrega)"
-                  value={data.cliente_entrega_firma}
-                  onChange={(v) => update('cliente_entrega_firma', v)}
-                />
+                {!data.cliente_entrega_sin_firma ? (
+                  <>
+                    <SignaturePad
+                      label="Firma del cliente (entrega) *"
+                      value={data.cliente_entrega_firma}
+                      onChange={(v) => update('cliente_entrega_firma', v)}
+                    />
+                    <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={data.cliente_entrega_sin_firma}
+                          onChange={e => {
+                            update('cliente_entrega_sin_firma', e.target.checked);
+                            if (e.target.checked) update('cliente_entrega_firma', '');
+                          }}
+                          className="mt-0.5"
+                        />
+                        <div className="text-xs text-amber-900">
+                          <span className="font-medium">El cliente no firmó en el momento del ingreso</span>
+                          <p className="text-amber-700 mt-0.5">Marque esta casilla solo si no fue posible obtener la firma. Deberá indicar el motivo.</p>
+                        </div>
+                      </label>
+                    </div>
+                  </>
+                ) : (
+                  <div className="p-4 bg-amber-50 border border-amber-300 rounded-lg space-y-3">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="text-amber-600 flex-shrink-0 mt-0.5" size={18} />
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-amber-900">Ingreso sin firma del cliente</p>
+                        <p className="text-xs text-amber-700 mt-1">Indique el motivo por el cual no se obtuvo la firma de ingreso.</p>
+                      </div>
+                    </div>
+                    <Field label="Motivo *">
+                      <textarea
+                        value={data.cliente_entrega_motivo_sin_firma}
+                        onChange={e => update('cliente_entrega_motivo_sin_firma', e.target.value)}
+                        className="input min-h-[80px] resize-y"
+                        placeholder="Ej: El chofer dejó el vehículo y se retiró sin esperar el registro. / Cliente envió vehículo por terceros sin acompañante."
+                      />
+                    </Field>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        update('cliente_entrega_sin_firma', false);
+                        update('cliente_entrega_motivo_sin_firma', '');
+                      }}
+                      className="text-xs text-amber-800 hover:text-amber-900 underline"
+                    >
+                      ← Volver a solicitar firma
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -943,6 +1055,7 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving }) {
               <p>• Vehículo: <span className="font-medium">{data.patente} · {data.marca} {data.modelo}</span></p>
               <p>• Servicios: <span className="font-medium">{(data.servicios || []).length + (data.servicios_otros ? 1 : 0)} marcados</span></p>
               <p>• Equipamiento: <span className="font-medium">{(data.equipamiento || []).length + (data.equipamiento_otros ? 1 : 0)} marcados</span></p>
+              <p>• Firma cliente: <span className="font-medium">{data.cliente_entrega_firma ? '✓ Registrada' : (data.cliente_entrega_sin_firma ? '⚠ Sin firma (con motivo)' : '✗ Pendiente')}</span></p>
             </div>
           </div>
         </div>
@@ -962,7 +1075,7 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving }) {
             </button>
           )}
           {step === 4 && (
-            <button onClick={() => onGuardar(data)} disabled={saving} className="btn-primary flex-1 sm:flex-none disabled:opacity-50">
+            <button onClick={intentarGuardar} disabled={saving} className="btn-primary flex-1 sm:flex-none disabled:opacity-50">
               {saving ? <><Loader2 size={16} className="animate-spin" /> Guardando...</> : <><Check size={16} /> Guardar ingreso</>}
             </button>
           )}
@@ -972,7 +1085,7 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving }) {
   );
 }
 
-function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving }) {
+function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving, showAlert }) {
   const [data, setData] = useState({
     ...ingreso,
     luandi_entrega_fecha: ingreso.luandi_entrega_fecha || new Date().toISOString().split('T')[0],
@@ -986,7 +1099,24 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving }) {
   });
   const update = (field, value) => setData({ ...data, [field]: value });
 
-  const puedeGuardar = data.luandi_entrega_persona && data.cliente_recibe_persona && data.cliente_recibe_firma;
+  const intentarGuardar = () => {
+    if (!data.luandi_entrega_persona) {
+      showAlert('Falta información', 'Indique el nombre del personal Luandi que entrega el vehículo.');
+      return;
+    }
+    if (!data.cliente_recibe_persona) {
+      showAlert('Falta información', 'Indique el nombre del cliente que recibe el vehículo.');
+      return;
+    }
+    if (!data.cliente_recibe_firma) {
+      showAlert(
+        'Falta la firma de conformidad',
+        'La firma del cliente al recibir el vehículo es obligatoria. Por favor solicite la firma antes de confirmar la entrega.\n\nLa firma de retiro es el respaldo de conformidad con los servicios realizados.'
+      );
+      return;
+    }
+    onGuardar(data);
+  };
 
   return (
     <div className="space-y-5">
@@ -1028,7 +1158,7 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving }) {
               value={data.cliente_recibe_firma}
               onChange={(v) => update('cliente_recibe_firma', v)}
             />
-            <p className="text-xs text-slate-500 mt-1">La firma del cliente confirma la conformidad con los servicios realizados y el estado del vehículo al retirarlo.</p>
+            <p className="text-xs text-slate-500 mt-1">La firma del cliente confirma la conformidad con los servicios realizados y el estado del vehículo al retirarlo. <strong>Esta firma es obligatoria.</strong></p>
           </div>
         </div>
       </div>
@@ -1048,9 +1178,9 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving }) {
       <div className="flex flex-col sm:flex-row gap-2 sm:justify-between">
         <button onClick={onCancelar} disabled={saving} className="btn-secondary order-2 sm:order-1 disabled:opacity-50">Cancelar</button>
         <button
-          onClick={() => onGuardar(data)}
-          disabled={!puedeGuardar || saving}
-          className="btn-primary order-1 sm:order-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          onClick={intentarGuardar}
+          disabled={saving}
+          className="btn-primary order-1 sm:order-2 disabled:opacity-50"
         >
           {saving ? <><Loader2 size={16} className="animate-spin" /> Guardando...</> : <><Check size={16} /> Confirmar entrega</>}
         </button>
@@ -1059,7 +1189,7 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving }) {
   );
 }
 
-function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, filterPatente, filterEmpresa, filterEstado, setFilterPatente, setFilterEmpresa, setFilterEstado, onAbrirSelector, onVer, onEntregar, onEditar, onEliminar, onExportarPeriodo, onPDFResumen, onNuevo }) {
+function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, filterPatente, filterEmpresa, filterEstado, setFilterPatente, setFilterEmpresa, setFilterEstado, onAbrirSelector, onVer, onEntregar, onEditar, onEliminar, onExportarPeriodo, onPDFRespaldos, onNuevo }) {
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3">
@@ -1069,8 +1199,8 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
             <p className="text-sm text-slate-500">{ingresos.length} de {totalDelPeriodo} registros</p>
           </div>
           <div className="flex gap-2 flex-wrap">
-            <button onClick={onPDFResumen} className="btn-secondary" title="Generar PDF con todos los ingresos del mes">
-              <FileText size={16} /> <span className="hidden sm:inline">PDF mes</span>
+            <button onClick={onPDFRespaldos} className="btn-secondary" title="Generar PDF con todos los respaldos firmados del mes">
+              <FileText size={16} /> <span className="hidden sm:inline">PDF respaldos</span>
             </button>
             <button onClick={onExportarPeriodo} className="btn-secondary">
               <Download size={16} /> <span className="hidden sm:inline">Excel mes</span>
@@ -1079,7 +1209,6 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
           </div>
         </div>
 
-        {/* Selector de período prominente */}
         <button
           onClick={onAbrirSelector}
           className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 flex items-center justify-between hover:from-blue-100 hover:to-indigo-100 transition-colors text-left"
@@ -1283,6 +1412,14 @@ function DetalleView({ ingreso, onVolver, onPDF, onEntregar }) {
               <img src={ingreso.cliente_entrega_firma} alt="Firma" className="border border-slate-200 rounded-lg bg-white max-h-24" />
             </div>
           )}
+          {ingreso.cliente_entrega_sin_firma && (
+            <div className="mt-3 pt-3 border-t border-slate-100">
+              <div className="p-2 bg-amber-50 border border-amber-200 rounded text-xs">
+                <p className="font-medium text-amber-900">⚠ Ingreso sin firma del cliente</p>
+                <p className="text-amber-700 mt-1"><strong>Motivo:</strong> {ingreso.cliente_entrega_motivo_sin_firma}</p>
+              </div>
+            </div>
+          )}
         </DetalleCard>
 
         <DetalleCard title="Entrega (Luandi → cliente)" icon={<PenLine size={18} />}>
@@ -1387,7 +1524,8 @@ function DetalleRow({ label, value }) {
   );
 }
 
-function generarHTMLReporte(i) {
+// Generar HTML de un solo ingreso (formato completo)
+function generarBloqueReporteIndividual(i, pageBreakAntes = false) {
   const servicios = SERVICIOS_CATALOGO.map(s => `
     <tr><td>${s}</td><td style="text-align:center;width:30px">${(i.servicios || []).includes(s) ? '✓' : ''}</td></tr>
   `).join('');
@@ -1395,28 +1533,18 @@ function generarHTMLReporte(i) {
     <tr><td>${s}</td><td style="text-align:center;width:30px">${(i.equipamiento || []).includes(s) ? '✓' : ''}</td></tr>
   `).join('');
 
-  return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Ingreso N°${i.n_control} - Luandi Servicios</title>
-<style>
-@page { size: A4; margin: 1cm; }
-* { box-sizing: border-box; }
-body { font-family: Arial, sans-serif; font-size: 11px; color: #1e293b; margin: 0; padding: 0; }
-.container { max-width: 800px; margin: 0 auto; border: 2px solid #1e293b; }
-.header { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 2px solid #1e293b; }
-.header-title { font-size: 16px; font-weight: bold; color: #1e40af; letter-spacing: 1px; }
-.logo { font-size: 12px; font-weight: bold; color: #1e40af; text-align: right; }
-.n-control { text-align: center; padding: 8px; font-size: 14px; font-weight: bold; border-bottom: 2px solid #1e293b; }
-.section-title { background: #64748b; color: white; padding: 6px 12px; font-weight: bold; text-align: center; font-size: 12px; }
-table { width: 100%; border-collapse: collapse; }
-td { border: 1px solid #1e293b; padding: 6px 8px; }
-.label { font-weight: bold; width: 25%; }
-.checkbox-table td { padding: 4px 8px; }
-.firma-box { border: 1px solid #1e293b; height: 80px; padding: 4px; text-align: center; }
-.firma-img { max-height: 70px; max-width: 100%; }
-.footer { text-align: center; padding: 8px; font-size: 10px; border-top: 2px solid #1e293b; }
-@media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
-</style></head><body>
-<div class="container">
+  const firmaIngresoHTML = i.cliente_entrega_firma
+    ? `<img src="${i.cliente_entrega_firma}" class="firma-img" />`
+    : (i.cliente_entrega_sin_firma
+        ? `<div style="font-size:9px;color:#92400e;padding:2px;text-align:center;line-height:1.2"><b>SIN FIRMA</b><br/><span style="font-size:8px">${(i.cliente_entrega_motivo_sin_firma || '').substring(0, 100)}</span></div>`
+        : `<span style="color:#94a3b8;font-size:10px">Firma cliente - Ingreso</span>`);
+
+  const firmaRetiroHTML = i.cliente_recibe_firma
+    ? `<img src="${i.cliente_recibe_firma}" class="firma-img" />`
+    : `<span style="color:#94a3b8;font-size:10px">Firma cliente - Retiro</span>`;
+
+  return `
+<div class="reporte-container" ${pageBreakAntes ? 'style="page-break-before:always"' : ''}>
   <div class="header">
     <div class="header-title">CONTROL DE INGRESO Y ENTREGA DE VEHICULO</div>
     <div class="logo">LUANDI SERVICIOS SPA<br><span style="font-size:9px;font-weight:normal">SERVICIOS INTEGRALES</span></div>
@@ -1460,12 +1588,8 @@ td { border: 1px solid #1e293b; padding: 6px 8px; }
       <td class="label">RECIBIDO POR:</td><td colspan="3">${i.cliente_recibe_persona || ''}</td>
     </tr>
     <tr>
-      <td colspan="4" class="firma-box">
-        ${i.cliente_entrega_firma ? `<img src="${i.cliente_entrega_firma}" class="firma-img" />` : '<span style="color:#94a3b8;font-size:10px">Firma cliente - Ingreso</span>'}
-      </td>
-      <td colspan="4" class="firma-box">
-        ${i.cliente_recibe_firma ? `<img src="${i.cliente_recibe_firma}" class="firma-img" />` : '<span style="color:#94a3b8;font-size:10px">Firma cliente - Retiro</span>'}
-      </td>
+      <td colspan="4" class="firma-box">${firmaIngresoHTML}</td>
+      <td colspan="4" class="firma-box">${firmaRetiroHTML}</td>
     </tr>
   </table>
   <div class="section-title">PERSONAL LUANDI</div>
@@ -1483,168 +1607,50 @@ td { border: 1px solid #1e293b; padding: 6px 8px; }
   </table>
   <table>
     <tr><td class="label">OBSERVACIONES</td></tr>
-    <tr><td style="height:80px;vertical-align:top">${(i.observaciones || '').replace(/\n/g, '<br>')}${i.observaciones_entrega ? '<br><br><b>Entrega:</b> ' + i.observaciones_entrega.replace(/\n/g, '<br>') : ''}</td></tr>
+    <tr><td style="height:60px;vertical-align:top">${(i.observaciones || '').replace(/\n/g, '<br>')}${i.observaciones_entrega ? '<br><br><b>Entrega:</b> ' + i.observaciones_entrega.replace(/\n/g, '<br>') : ''}</td></tr>
   </table>
   <div class="footer">
-    <b>Luandi Servicios SPA</b><br>
-    Manzana 10, Sitio 11, Barrio Industrial Puerto Seco<br>
-    Fono: 963458567 · contacto@luandiservicios.com · www.luandiservicios.com
+    <b>Luandi Servicios SPA</b> · Manzana 10, Sitio 11, Barrio Industrial Puerto Seco · Fono: 963458567 · contacto@luandiservicios.com
   </div>
-</div>
+</div>`;
+}
+
+function getEstilosReporte() {
+  return `
+@page { size: A4; margin: 1cm; }
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; font-size: 11px; color: #1e293b; margin: 0; padding: 0; }
+.reporte-container { max-width: 800px; margin: 0 auto 0 auto; border: 2px solid #1e293b; }
+.header { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 2px solid #1e293b; }
+.header-title { font-size: 16px; font-weight: bold; color: #1e40af; letter-spacing: 1px; }
+.logo { font-size: 12px; font-weight: bold; color: #1e40af; text-align: right; }
+.n-control { text-align: center; padding: 8px; font-size: 14px; font-weight: bold; border-bottom: 2px solid #1e293b; }
+.section-title { background: #64748b; color: white; padding: 6px 12px; font-weight: bold; text-align: center; font-size: 12px; }
+table { width: 100%; border-collapse: collapse; }
+td { border: 1px solid #1e293b; padding: 6px 8px; }
+.label { font-weight: bold; width: 25%; }
+.checkbox-table td { padding: 4px 8px; }
+.firma-box { border: 1px solid #1e293b; height: 80px; padding: 4px; text-align: center; vertical-align: middle; }
+.firma-img { max-height: 70px; max-width: 100%; }
+.footer { text-align: center; padding: 8px; font-size: 9px; border-top: 2px solid #1e293b; }
+@media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
+`;
+}
+
+function generarHTMLReporte(i) {
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Ingreso N°${i.n_control} - Luandi Servicios</title>
+<style>${getEstilosReporte()}</style></head><body>
+${generarBloqueReporteIndividual(i, false)}
 </body></html>`;
 }
 
-function generarHTMLResumenMes(ingresos, periodoLabel) {
-  // Estadísticas del mes
-  const total = ingresos.length;
-  const entregados = ingresos.filter(i => i.estado === 'entregado').length;
-  const enProceso = ingresos.filter(i => i.estado === 'en_proceso').length;
-  const empresasUnicas = new Set(ingresos.map(i => i.nombre_empresa)).size;
-  
-  // Servicios más realizados
-  const conteoServicios = {};
-  ingresos.forEach(i => {
-    (i.servicios || []).forEach(s => {
-      conteoServicios[s] = (conteoServicios[s] || 0) + 1;
-    });
-  });
-  const topServicios = Object.entries(conteoServicios)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5);
-
-  // Equipamiento más cambiado
-  const conteoEquipos = {};
-  ingresos.forEach(i => {
-    (i.equipamiento || []).forEach(s => {
-      conteoEquipos[s] = (conteoEquipos[s] || 0) + 1;
-    });
-  });
-  const topEquipos = Object.entries(conteoEquipos)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5);
-
-  const detalleIngresos = ingresos.map((i, idx) => `
-    <div class="ingreso-card ${idx > 0 ? 'page-break' : ''}">
-      <div class="ingreso-header">
-        <div>
-          <strong>N°${i.n_control}</strong> · ${i.nombre_empresa || ''}
-        </div>
-        <div class="estado ${i.estado}">
-          ${i.estado === 'entregado' ? 'ENTREGADO' : 'EN PROCESO'}
-        </div>
-      </div>
-      <table class="ingreso-tabla">
-        <tr>
-          <td class="label">Patente:</td><td>${i.patente || ''}</td>
-          <td class="label">Marca:</td><td>${i.marca || ''} ${i.modelo || ''}</td>
-        </tr>
-        <tr>
-          <td class="label">Tipo:</td><td>${i.tipo_vehiculo || ''}</td>
-          <td class="label">Kilometraje:</td><td>${i.kilometraje || ''}</td>
-        </tr>
-        <tr>
-          <td class="label">Ingreso:</td><td>${i.cliente_entrega_fecha || ''} ${i.cliente_entrega_hora || ''}</td>
-          <td class="label">Entrega:</td><td>${i.luandi_entrega_fecha || '—'} ${i.luandi_entrega_hora || ''}</td>
-        </tr>
-        <tr>
-          <td class="label">Servicios:</td>
-          <td colspan="3">${[...(i.servicios || []), i.servicios_otros].filter(Boolean).join(' · ') || '—'}</td>
-        </tr>
-        <tr>
-          <td class="label">Equipamiento:</td>
-          <td colspan="3">${[...(i.equipamiento || []), i.equipamiento_otros].filter(Boolean).join(' · ') || '—'}</td>
-        </tr>
-        ${i.observaciones ? `<tr><td class="label">Observaciones:</td><td colspan="3">${i.observaciones.replace(/\n/g, '<br>')}</td></tr>` : ''}
-      </table>
-    </div>
-  `).join('');
+function generarHTMLRespaldosMes(ingresos, periodoLabel) {
+  const bloques = ingresos.map((i, idx) => generarBloqueReporteIndividual(i, idx > 0)).join('\n');
 
   return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Resumen ${periodoLabel} - Luandi Servicios</title>
-<style>
-@page { size: A4; margin: 1.5cm; }
-* { box-sizing: border-box; }
-body { font-family: Arial, sans-serif; font-size: 11px; color: #1e293b; margin: 0; padding: 0; }
-.cover { text-align: center; padding: 40px 20px; border-bottom: 3px solid #1e40af; margin-bottom: 20px; page-break-after: always; }
-.cover h1 { color: #1e40af; font-size: 28px; margin: 0 0 8px 0; }
-.cover h2 { color: #64748b; font-size: 18px; margin: 0 0 30px 0; font-weight: normal; }
-.cover .logo { font-size: 20px; font-weight: bold; color: #1e40af; margin-bottom: 30px; }
-.stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; max-width: 500px; margin: 30px auto; }
-.stat-box { border: 2px solid #1e40af; padding: 16px; border-radius: 8px; }
-.stat-value { font-size: 32px; font-weight: bold; color: #1e40af; }
-.stat-label { font-size: 12px; color: #64748b; text-transform: uppercase; }
-.section-title { background: #1e40af; color: white; padding: 8px 14px; font-weight: bold; font-size: 13px; margin-top: 20px; border-radius: 4px; }
-.top-list { margin: 10px 0; }
-.top-item { display: flex; justify-content: space-between; padding: 6px 12px; border-bottom: 1px solid #e2e8f0; }
-.top-item strong { color: #1e40af; }
-.ingreso-card { margin-bottom: 15px; border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; }
-.page-break { page-break-before: always; }
-.ingreso-header { background: #f1f5f9; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #cbd5e1; }
-.estado { padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: bold; }
-.estado.entregado { background: #dcfce7; color: #15803d; }
-.estado.en_proceso { background: #fef3c7; color: #b45309; }
-.ingreso-tabla { width: 100%; border-collapse: collapse; }
-.ingreso-tabla td { padding: 5px 8px; border-bottom: 1px solid #f1f5f9; font-size: 10px; }
-.ingreso-tabla td.label { font-weight: bold; color: #64748b; width: 110px; }
-.footer { text-align: center; padding: 12px; font-size: 9px; border-top: 2px solid #1e293b; margin-top: 30px; color: #64748b; }
-@media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } .page-break { page-break-before: always; } }
-</style></head><body>
-
-<div class="cover">
-  <div class="logo">LUANDI SERVICIOS SPA</div>
-  <h1>Resumen Mensual</h1>
-  <h2>${periodoLabel}</h2>
-  
-  <div class="stats">
-    <div class="stat-box">
-      <div class="stat-value">${total}</div>
-      <div class="stat-label">Total ingresos</div>
-    </div>
-    <div class="stat-box">
-      <div class="stat-value">${entregados}</div>
-      <div class="stat-label">Entregados</div>
-    </div>
-    <div class="stat-box">
-      <div class="stat-value">${enProceso}</div>
-      <div class="stat-label">En proceso</div>
-    </div>
-    <div class="stat-box">
-      <div class="stat-value">${empresasUnicas}</div>
-      <div class="stat-label">Empresas atendidas</div>
-    </div>
-  </div>
-
-  ${topServicios.length > 0 ? `
-  <div class="section-title">Servicios más realizados</div>
-  <div class="top-list">
-    ${topServicios.map(([nombre, cant]) => `
-      <div class="top-item"><span>${nombre}</span><strong>${cant}</strong></div>
-    `).join('')}
-  </div>
-  ` : ''}
-
-  ${topEquipos.length > 0 ? `
-  <div class="section-title">Equipamiento más cambiado</div>
-  <div class="top-list">
-    ${topEquipos.map(([nombre, cant]) => `
-      <div class="top-item"><span>${nombre}</span><strong>${cant}</strong></div>
-    `).join('')}
-  </div>
-  ` : ''}
-  
-  <p style="margin-top: 40px; font-size: 10px; color: #94a3b8;">
-    Generado el ${new Date().toLocaleString('es-CL')}
-  </p>
-</div>
-
-<h2 style="color: #1e40af; border-bottom: 2px solid #1e40af; padding-bottom: 8px;">Detalle de Ingresos · ${periodoLabel}</h2>
-
-${detalleIngresos}
-
-<div class="footer">
-  <b>Luandi Servicios SPA</b> · Manzana 10, Sitio 11, Barrio Industrial Puerto Seco<br>
-  Fono: 963458567 · contacto@luandiservicios.com · www.luandiservicios.com
-</div>
-
+<html><head><meta charset="utf-8"><title>Respaldos ${periodoLabel} - Luandi Servicios</title>
+<style>${getEstilosReporte()}</style></head><body>
+${bloques}
 </body></html>`;
 }
