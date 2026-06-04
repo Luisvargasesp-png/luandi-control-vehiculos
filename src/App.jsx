@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock, Loader2, Cloud, CloudOff } from 'lucide-react';
+import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock, Loader2, Cloud, CloudOff, FolderOpen, ArrowLeft } from 'lucide-react';
 import { supabase } from './supabase';
 
 const SERVICIOS_CATALOGO = [
@@ -28,7 +28,19 @@ const EQUIPAMIENTO_CATALOGO = [
 
 const TIPOS_VEHICULO = ['Camioneta', 'Camión', 'Bus', 'Minibus', 'Automóvil', 'SUV', 'Furgón', 'Maquinaria'];
 
-// Convertir registro de Supabase a formato interno
+const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+// Helper: obtener clave de período YYYY-MM
+function getPeriodoKey(fecha) {
+  const d = new Date(fecha);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function getPeriodoLabel(periodoKey) {
+  const [year, month] = periodoKey.split('-');
+  return `${MESES[parseInt(month) - 1]} ${year}`;
+}
+
 function dbToApp(row) {
   return {
     id: row.id,
@@ -64,10 +76,8 @@ function dbToApp(row) {
   };
 }
 
-// Convertir registro interno a formato Supabase (limpia campos vacíos para fechas/horas)
 function appToDb(data) {
   const clean = { ...data };
-  // Convertir strings vacíos a null en campos de fecha/hora
   const dateFields = ['cliente_entrega_fecha', 'luandi_recibe_fecha', 'luandi_entrega_fecha', 'cliente_recibe_fecha'];
   const timeFields = ['cliente_entrega_hora', 'luandi_recibe_hora', 'luandi_entrega_hora', 'cliente_recibe_hora'];
   [...dateFields, ...timeFields].forEach(f => {
@@ -187,9 +197,10 @@ export default function LuandiApp() {
   const [filterPatente, setFilterPatente] = useState('');
   const [filterEmpresa, setFilterEmpresa] = useState('');
   const [filterEstado, setFilterEstado] = useState('todos');
+  const [periodoSeleccionado, setPeriodoSeleccionado] = useState(getPeriodoKey(new Date()));
+  const [mostrarSelectorPeriodo, setMostrarSelectorPeriodo] = useState(false);
   const [toast, setToast] = useState(null);
 
-  // Cargar ingresos iniciales desde Supabase
   const cargarIngresos = async () => {
     try {
       const { data, error } = await supabase
@@ -211,8 +222,6 @@ export default function LuandiApp() {
 
   useEffect(() => {
     cargarIngresos();
-
-    // Suscripción en tiempo real: cuando alguien crea/edita/elimina, se actualiza solo
     const subscription = supabase
       .channel('ingresos_changes')
       .on('postgres_changes',
@@ -220,7 +229,6 @@ export default function LuandiApp() {
         () => { cargarIngresos(); }
       )
       .subscribe();
-
     return () => { subscription.unsubscribe(); };
   }, []);
 
@@ -229,7 +237,6 @@ export default function LuandiApp() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // Obtener siguiente número de control desde Supabase (atómico)
   const obtenerSiguienteNumero = async () => {
     const { data, error } = await supabase.rpc('siguiente_n_control');
     if (error) throw error;
@@ -240,7 +247,6 @@ export default function LuandiApp() {
     setSaving(true);
     try {
       if (data.id) {
-        // Actualización
         const { id, ...resto } = data;
         const { error } = await supabase
           .from('ingresos')
@@ -249,7 +255,6 @@ export default function LuandiApp() {
         if (error) throw error;
         showToast('Registro actualizado correctamente');
       } else {
-        // Nuevo ingreso
         const n_control = await obtenerSiguienteNumero();
         const nuevo = appToDb({
           ...data,
@@ -303,14 +308,71 @@ export default function LuandiApp() {
     }
   };
 
-  const ingresosFiltrados = ingresos.filter(i => {
+  // Agrupar ingresos por período (YYYY-MM)
+  const periodosDisponibles = (() => {
+    const map = new Map();
+    ingresos.forEach(i => {
+      const key = getPeriodoKey(i.fecha_creacion);
+      map.set(key, (map.get(key) || 0) + 1);
+    });
+    return Array.from(map.entries())
+      .map(([key, count]) => ({ key, count, label: getPeriodoLabel(key) }))
+      .sort((a, b) => b.key.localeCompare(a.key));
+  })();
+
+  // Filtrar ingresos según período + filtros de búsqueda
+  const ingresosDelPeriodo = ingresos.filter(i => getPeriodoKey(i.fecha_creacion) === periodoSeleccionado);
+
+  const ingresosFiltrados = ingresosDelPeriodo.filter(i => {
     const matchPatente = !filterPatente || (i.patente || '').toLowerCase().includes(filterPatente.toLowerCase());
     const matchEmpresa = !filterEmpresa || (i.nombre_empresa || '').toLowerCase().includes(filterEmpresa.toLowerCase());
     const matchEstado = filterEstado === 'todos' || i.estado === filterEstado;
     return matchPatente && matchEmpresa && matchEstado;
   });
 
-  const exportarExcel = () => {
+  const exportarExcelPeriodo = () => {
+    if (ingresosDelPeriodo.length === 0) {
+      showToast('No hay registros en este período para exportar', 'info');
+      return;
+    }
+    const headers = ['N°Control', 'Fecha Creación', 'Estado', 'Empresa', 'Patente', 'Tipo Vehículo', 'Marca', 'Modelo', 'Kilometraje', 'Servicios', 'Equipamiento', 'Fecha Ingreso Cliente', 'Hora Ingreso Cliente', 'Entregado por (cliente)', 'Recibido por (Luandi)', 'Fecha Entrega Cliente', 'Hora Entrega Cliente', 'Entregado por (Luandi)', 'Recibido por (cliente)', 'Observaciones'];
+    
+    const rows = ingresosDelPeriodo.map(i => [
+      i.n_control,
+      new Date(i.fecha_creacion).toLocaleDateString('es-CL'),
+      i.estado === 'entregado' ? 'Entregado' : 'En proceso',
+      i.nombre_empresa || '',
+      i.patente || '',
+      i.tipo_vehiculo || '',
+      i.marca || '',
+      i.modelo || '',
+      i.kilometraje || '',
+      [...(i.servicios || []), i.servicios_otros].filter(Boolean).join('; '),
+      [...(i.equipamiento || []), i.equipamiento_otros].filter(Boolean).join('; '),
+      i.cliente_entrega_fecha || '',
+      i.cliente_entrega_hora || '',
+      i.cliente_entrega_persona || '',
+      i.luandi_recibe_persona || '',
+      i.luandi_entrega_fecha || '',
+      i.luandi_entrega_hora || '',
+      i.luandi_entrega_persona || '',
+      i.cliente_recibe_persona || '',
+      (i.observaciones || '').replace(/\n/g, ' ')
+    ]);
+
+    const csv = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const periodoLabel = getPeriodoLabel(periodoSeleccionado).replace(' ', '_');
+    a.download = `Luandi_Ingresos_${periodoLabel}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`${ingresosDelPeriodo.length} registros exportados (${getPeriodoLabel(periodoSeleccionado)})`);
+  };
+
+  const exportarExcelTodo = () => {
     if (ingresos.length === 0) {
       showToast('No hay registros para exportar', 'info');
       return;
@@ -345,7 +407,7 @@ export default function LuandiApp() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Luandi_Ingresos_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `Luandi_Ingresos_Completo_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
     showToast(`${ingresos.length} registros exportados`);
@@ -358,6 +420,22 @@ export default function LuandiApp() {
       return;
     }
     const html = generarHTMLReporte(ingreso);
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => win.print(), 500);
+  };
+
+  const generarPDFResumenMes = () => {
+    if (ingresosDelPeriodo.length === 0) {
+      showToast('No hay registros en este período para generar PDF', 'info');
+      return;
+    }
+    const win = window.open('', '_blank');
+    if (!win) {
+      showToast('Permita ventanas emergentes para descargar el PDF', 'error');
+      return;
+    }
+    const html = generarHTMLResumenMes(ingresosDelPeriodo, getPeriodoLabel(periodoSeleccionado));
     win.document.write(html);
     win.document.close();
     setTimeout(() => win.print(), 500);
@@ -419,13 +497,24 @@ export default function LuandiApp() {
         </div>
       )}
 
+      {mostrarSelectorPeriodo && (
+        <SelectorPeriodo
+          periodos={periodosDisponibles}
+          periodoActual={periodoSeleccionado}
+          onSelect={(p) => { setPeriodoSeleccionado(p); setMostrarSelectorPeriodo(false); }}
+          onClose={() => setMostrarSelectorPeriodo(false)}
+        />
+      )}
+
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         {view === 'home' && (
           <HomeView
             ingresos={ingresos}
+            ingresosDelPeriodo={ingresosDelPeriodo}
+            periodoLabel={getPeriodoLabel(periodoSeleccionado)}
             onNuevo={() => { setSelectedIngreso(null); setView('nuevo'); }}
             onHistorial={() => setView('historial')}
-            onExportar={exportarExcel}
+            onExportar={exportarExcelTodo}
           />
         )}
         {view === 'nuevo' && (
@@ -439,18 +528,22 @@ export default function LuandiApp() {
         {view === 'historial' && (
           <HistorialView
             ingresos={ingresosFiltrados}
-            totalIngresos={ingresos.length}
+            totalDelPeriodo={ingresosDelPeriodo.length}
+            periodoLabel={getPeriodoLabel(periodoSeleccionado)}
+            esMesActual={periodoSeleccionado === getPeriodoKey(new Date())}
             filterPatente={filterPatente}
             filterEmpresa={filterEmpresa}
             filterEstado={filterEstado}
             setFilterPatente={setFilterPatente}
             setFilterEmpresa={setFilterEmpresa}
             setFilterEstado={setFilterEstado}
+            onAbrirSelector={() => setMostrarSelectorPeriodo(true)}
             onVer={(i) => { setSelectedIngreso(i); setView('detalle'); }}
             onEntregar={(i) => { setSelectedIngreso(i); setView('entrega'); }}
             onEditar={(i) => { setSelectedIngreso(i); setView('nuevo'); }}
             onEliminar={eliminarIngreso}
-            onExportar={exportarExcel}
+            onExportarPeriodo={exportarExcelPeriodo}
+            onPDFResumen={generarPDFResumenMes}
             onNuevo={() => { setSelectedIngreso(null); setView('nuevo'); }}
           />
         )}
@@ -483,7 +576,58 @@ export default function LuandiApp() {
   );
 }
 
-function HomeView({ ingresos, onNuevo, onHistorial, onExportar }) {
+function SelectorPeriodo({ periodos, periodoActual, onSelect, onClose }) {
+  // Agrupar por año
+  const porAnio = {};
+  periodos.forEach(p => {
+    const anio = p.key.split('-')[0];
+    if (!porAnio[anio]) porAnio[anio] = [];
+    porAnio[anio].push(p);
+  });
+  const anios = Object.keys(porAnio).sort((a, b) => b.localeCompare(a));
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+          <h3 className="font-bold text-slate-900">Seleccionar período</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <X size={20} />
+          </button>
+        </div>
+        <div className="overflow-y-auto p-3">
+          {periodos.length === 0 ? (
+            <p className="text-center text-slate-500 py-8 text-sm">No hay registros aún</p>
+          ) : (
+            anios.map(anio => (
+              <div key={anio} className="mb-3">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider px-3 py-2">Año {anio}</p>
+                <div className="space-y-1">
+                  {porAnio[anio].map(p => (
+                    <button
+                      key={p.key}
+                      onClick={() => onSelect(p.key)}
+                      className={`w-full text-left px-3 py-2.5 rounded-lg flex items-center justify-between transition-colors ${
+                        p.key === periodoActual ? 'bg-blue-50 text-blue-900 border border-blue-200' : 'hover:bg-slate-50 border border-transparent'
+                      }`}
+                    >
+                      <span className="font-medium text-sm">{p.label}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${p.key === periodoActual ? 'bg-blue-200 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>
+                        {p.count} {p.count === 1 ? 'ingreso' : 'ingresos'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HomeView({ ingresos, ingresosDelPeriodo, periodoLabel, onNuevo, onHistorial, onExportar }) {
   const enProceso = ingresos.filter(i => i.estado === 'en_proceso').length;
   const entregados = ingresos.filter(i => i.estado === 'entregado').length;
   const hoy = ingresos.filter(i => {
@@ -516,13 +660,13 @@ function HomeView({ ingresos, onNuevo, onHistorial, onExportar }) {
           onClick={onHistorial}
           icon={<ClipboardList size={28} />}
           title="Historial"
-          description="Ver todos los registros y gestionar entregas"
+          description={`${ingresosDelPeriodo.length} ingresos en ${periodoLabel}`}
         />
         <ActionCard
           onClick={onExportar}
           icon={<Download size={28} />}
-          title="Exportar Excel"
-          description="Descargar consolidado de todos los registros"
+          title="Exportar Todo"
+          description="Descargar consolidado completo de todos los registros"
         />
       </div>
 
@@ -915,18 +1059,45 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving }) {
   );
 }
 
-function HistorialView({ ingresos, totalIngresos, filterPatente, filterEmpresa, filterEstado, setFilterPatente, setFilterEmpresa, setFilterEstado, onVer, onEntregar, onEditar, onEliminar, onExportar, onNuevo }) {
+function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, filterPatente, filterEmpresa, filterEstado, setFilterPatente, setFilterEmpresa, setFilterEstado, onAbrirSelector, onVer, onEntregar, onEditar, onEliminar, onExportarPeriodo, onPDFResumen, onNuevo }) {
   return (
     <div className="space-y-5">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-slate-900">Historial de Ingresos</h2>
-          <p className="text-sm text-slate-500">{ingresos.length} de {totalIngresos} registros</p>
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900">Historial de Ingresos</h2>
+            <p className="text-sm text-slate-500">{ingresos.length} de {totalDelPeriodo} registros</p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={onPDFResumen} className="btn-secondary" title="Generar PDF con todos los ingresos del mes">
+              <FileText size={16} /> <span className="hidden sm:inline">PDF mes</span>
+            </button>
+            <button onClick={onExportarPeriodo} className="btn-secondary">
+              <Download size={16} /> <span className="hidden sm:inline">Excel mes</span>
+            </button>
+            <button onClick={onNuevo} className="btn-primary"><Plus size={16} /> Nuevo</button>
+          </div>
         </div>
-        <div className="flex gap-2">
-          <button onClick={onExportar} className="btn-secondary"><Download size={16} /> Excel</button>
-          <button onClick={onNuevo} className="btn-primary"><Plus size={16} /> Nuevo</button>
-        </div>
+
+        {/* Selector de período prominente */}
+        <button
+          onClick={onAbrirSelector}
+          className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 flex items-center justify-between hover:from-blue-100 hover:to-indigo-100 transition-colors text-left"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white">
+              <Calendar size={20} />
+            </div>
+            <div>
+              <p className="text-xs text-blue-700 font-medium">{esMesActual ? 'Mes actual' : 'Período seleccionado'}</p>
+              <p className="font-bold text-blue-900">{periodoLabel}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 text-blue-700">
+            <span className="text-sm font-medium hidden sm:inline">Cambiar período</span>
+            <FolderOpen size={18} />
+          </div>
+        </button>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-4">
@@ -962,8 +1133,17 @@ function HistorialView({ ingresos, totalIngresos, filterPatente, filterEmpresa, 
       {ingresos.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
           <ClipboardList className="mx-auto text-slate-300 mb-3" size={48} />
-          <p className="text-slate-500 font-medium">No hay registros que coincidan</p>
-          <p className="text-sm text-slate-400 mt-1">Pruebe ajustar los filtros o crear un nuevo ingreso</p>
+          <p className="text-slate-500 font-medium">
+            {totalDelPeriodo === 0 ? `No hay registros en ${periodoLabel}` : 'No hay registros que coincidan'}
+          </p>
+          <p className="text-sm text-slate-400 mt-1">
+            {totalDelPeriodo === 0 ? 'Cambie de período o cree un nuevo ingreso' : 'Pruebe ajustar los filtros'}
+          </p>
+          {totalDelPeriodo === 0 && (
+            <button onClick={onAbrirSelector} className="btn-secondary mt-4">
+              <FolderOpen size={16} /> Ver otros períodos
+            </button>
+          )}
         </div>
       ) : (
         <>
@@ -1311,5 +1491,160 @@ td { border: 1px solid #1e293b; padding: 6px 8px; }
     Fono: 963458567 · contacto@luandiservicios.com · www.luandiservicios.com
   </div>
 </div>
+</body></html>`;
+}
+
+function generarHTMLResumenMes(ingresos, periodoLabel) {
+  // Estadísticas del mes
+  const total = ingresos.length;
+  const entregados = ingresos.filter(i => i.estado === 'entregado').length;
+  const enProceso = ingresos.filter(i => i.estado === 'en_proceso').length;
+  const empresasUnicas = new Set(ingresos.map(i => i.nombre_empresa)).size;
+  
+  // Servicios más realizados
+  const conteoServicios = {};
+  ingresos.forEach(i => {
+    (i.servicios || []).forEach(s => {
+      conteoServicios[s] = (conteoServicios[s] || 0) + 1;
+    });
+  });
+  const topServicios = Object.entries(conteoServicios)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  // Equipamiento más cambiado
+  const conteoEquipos = {};
+  ingresos.forEach(i => {
+    (i.equipamiento || []).forEach(s => {
+      conteoEquipos[s] = (conteoEquipos[s] || 0) + 1;
+    });
+  });
+  const topEquipos = Object.entries(conteoEquipos)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  const detalleIngresos = ingresos.map((i, idx) => `
+    <div class="ingreso-card ${idx > 0 ? 'page-break' : ''}">
+      <div class="ingreso-header">
+        <div>
+          <strong>N°${i.n_control}</strong> · ${i.nombre_empresa || ''}
+        </div>
+        <div class="estado ${i.estado}">
+          ${i.estado === 'entregado' ? 'ENTREGADO' : 'EN PROCESO'}
+        </div>
+      </div>
+      <table class="ingreso-tabla">
+        <tr>
+          <td class="label">Patente:</td><td>${i.patente || ''}</td>
+          <td class="label">Marca:</td><td>${i.marca || ''} ${i.modelo || ''}</td>
+        </tr>
+        <tr>
+          <td class="label">Tipo:</td><td>${i.tipo_vehiculo || ''}</td>
+          <td class="label">Kilometraje:</td><td>${i.kilometraje || ''}</td>
+        </tr>
+        <tr>
+          <td class="label">Ingreso:</td><td>${i.cliente_entrega_fecha || ''} ${i.cliente_entrega_hora || ''}</td>
+          <td class="label">Entrega:</td><td>${i.luandi_entrega_fecha || '—'} ${i.luandi_entrega_hora || ''}</td>
+        </tr>
+        <tr>
+          <td class="label">Servicios:</td>
+          <td colspan="3">${[...(i.servicios || []), i.servicios_otros].filter(Boolean).join(' · ') || '—'}</td>
+        </tr>
+        <tr>
+          <td class="label">Equipamiento:</td>
+          <td colspan="3">${[...(i.equipamiento || []), i.equipamiento_otros].filter(Boolean).join(' · ') || '—'}</td>
+        </tr>
+        ${i.observaciones ? `<tr><td class="label">Observaciones:</td><td colspan="3">${i.observaciones.replace(/\n/g, '<br>')}</td></tr>` : ''}
+      </table>
+    </div>
+  `).join('');
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Resumen ${periodoLabel} - Luandi Servicios</title>
+<style>
+@page { size: A4; margin: 1.5cm; }
+* { box-sizing: border-box; }
+body { font-family: Arial, sans-serif; font-size: 11px; color: #1e293b; margin: 0; padding: 0; }
+.cover { text-align: center; padding: 40px 20px; border-bottom: 3px solid #1e40af; margin-bottom: 20px; page-break-after: always; }
+.cover h1 { color: #1e40af; font-size: 28px; margin: 0 0 8px 0; }
+.cover h2 { color: #64748b; font-size: 18px; margin: 0 0 30px 0; font-weight: normal; }
+.cover .logo { font-size: 20px; font-weight: bold; color: #1e40af; margin-bottom: 30px; }
+.stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; max-width: 500px; margin: 30px auto; }
+.stat-box { border: 2px solid #1e40af; padding: 16px; border-radius: 8px; }
+.stat-value { font-size: 32px; font-weight: bold; color: #1e40af; }
+.stat-label { font-size: 12px; color: #64748b; text-transform: uppercase; }
+.section-title { background: #1e40af; color: white; padding: 8px 14px; font-weight: bold; font-size: 13px; margin-top: 20px; border-radius: 4px; }
+.top-list { margin: 10px 0; }
+.top-item { display: flex; justify-content: space-between; padding: 6px 12px; border-bottom: 1px solid #e2e8f0; }
+.top-item strong { color: #1e40af; }
+.ingreso-card { margin-bottom: 15px; border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; }
+.page-break { page-break-before: always; }
+.ingreso-header { background: #f1f5f9; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #cbd5e1; }
+.estado { padding: 3px 8px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+.estado.entregado { background: #dcfce7; color: #15803d; }
+.estado.en_proceso { background: #fef3c7; color: #b45309; }
+.ingreso-tabla { width: 100%; border-collapse: collapse; }
+.ingreso-tabla td { padding: 5px 8px; border-bottom: 1px solid #f1f5f9; font-size: 10px; }
+.ingreso-tabla td.label { font-weight: bold; color: #64748b; width: 110px; }
+.footer { text-align: center; padding: 12px; font-size: 9px; border-top: 2px solid #1e293b; margin-top: 30px; color: #64748b; }
+@media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } .page-break { page-break-before: always; } }
+</style></head><body>
+
+<div class="cover">
+  <div class="logo">LUANDI SERVICIOS SPA</div>
+  <h1>Resumen Mensual</h1>
+  <h2>${periodoLabel}</h2>
+  
+  <div class="stats">
+    <div class="stat-box">
+      <div class="stat-value">${total}</div>
+      <div class="stat-label">Total ingresos</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value">${entregados}</div>
+      <div class="stat-label">Entregados</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value">${enProceso}</div>
+      <div class="stat-label">En proceso</div>
+    </div>
+    <div class="stat-box">
+      <div class="stat-value">${empresasUnicas}</div>
+      <div class="stat-label">Empresas atendidas</div>
+    </div>
+  </div>
+
+  ${topServicios.length > 0 ? `
+  <div class="section-title">Servicios más realizados</div>
+  <div class="top-list">
+    ${topServicios.map(([nombre, cant]) => `
+      <div class="top-item"><span>${nombre}</span><strong>${cant}</strong></div>
+    `).join('')}
+  </div>
+  ` : ''}
+
+  ${topEquipos.length > 0 ? `
+  <div class="section-title">Equipamiento más cambiado</div>
+  <div class="top-list">
+    ${topEquipos.map(([nombre, cant]) => `
+      <div class="top-item"><span>${nombre}</span><strong>${cant}</strong></div>
+    `).join('')}
+  </div>
+  ` : ''}
+  
+  <p style="margin-top: 40px; font-size: 10px; color: #94a3b8;">
+    Generado el ${new Date().toLocaleString('es-CL')}
+  </p>
+</div>
+
+<h2 style="color: #1e40af; border-bottom: 2px solid #1e40af; padding-bottom: 8px;">Detalle de Ingresos · ${periodoLabel}</h2>
+
+${detalleIngresos}
+
+<div class="footer">
+  <b>Luandi Servicios SPA</b> · Manzana 10, Sitio 11, Barrio Industrial Puerto Seco<br>
+  Fono: 963458567 · contacto@luandiservicios.com · www.luandiservicios.com
+</div>
+
 </body></html>`;
 }
