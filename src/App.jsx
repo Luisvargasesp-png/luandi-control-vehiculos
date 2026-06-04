@@ -1011,12 +1011,15 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
                     <button
                       type="button"
                       onClick={() => {
-                        update('cliente_entrega_sin_firma', false);
-                        update('cliente_entrega_motivo_sin_firma', '');
+                        setData(prev => ({
+                          ...prev,
+                          cliente_entrega_sin_firma: false,
+                          cliente_entrega_motivo_sin_firma: ''
+                        }));
                       }}
-                      className="text-xs text-amber-800 hover:text-amber-900 underline"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-amber-400 text-amber-800 hover:bg-amber-100 hover:border-amber-500 rounded-md text-xs font-medium cursor-pointer transition-colors"
                     >
-                      ← Volver a solicitar firma
+                      <ChevronLeft size={14} /> Volver a solicitar firma
                     </button>
                   </div>
                 )}
