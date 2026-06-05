@@ -2,8 +2,48 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock, Loader2, Cloud, CloudOff, FolderOpen, AlertTriangle, Lock, RotateCcw } from 'lucide-react';
 import { supabase } from './supabase';
 
+// ====== CATÁLOGOS ======
+
+const EMPRESAS_CATALOGO = [
+  'ARAMARK',
+  'ATLAS COPCO',
+  'BARBARA RENT A CAR',
+  'BESALCO',
+  'CBS',
+  'COLORADO (SIGMA)',
+  'COMTECSA',
+  'ECHEVERRIA IZQUIERDO',
+  'JEJ',
+  'MINING TAG',
+  'SECHE',
+  'TOLOZA',
+  'VILLA TRAVEL'
+];
+
+// Marcas con sus modelos asociados
+const MARCAS_CATALOGO = {
+  'CHANGAN': [],
+  'CHEVROLET': ['COLORADO'],
+  'FORD': ['MAVERICK', 'RANGER'],
+  'GWM': ['POER'],
+  'JAC': [],
+  'MACK': [],
+  'MAXUS': ['T-60', 'T-90'],
+  'MAZDA': [],
+  'MERCEDES BENZ': ['SPRINTER'],
+  'MITSUBISHI': ['L200'],
+  'NISSAN': ['NAVARA'],
+  'TOYOTA': ['HILUX'],
+  'VOLKSWAGEN': ['CONSTELLATION'],
+  'VOLVO': []
+};
+
+const MARCAS_LISTA = Object.keys(MARCAS_CATALOGO);
+
 const SERVICIOS_CATALOGO = [
   'Lavado Full (exterior, interior y chasis)',
+  'Lavado Full Diurno (Comtecsa)',
+  'Lavado Full Nocturno (Comtecsa)',
   'Lavado Exterior Completo (exterior y chasis)',
   'Limpieza Interior',
   'Lavado Exterior (sin chasis)',
@@ -11,19 +51,25 @@ const SERVICIOS_CATALOGO = [
   'Instalación de Fundas Asientos',
   'Recarga de Adblue',
   'Torqueo de Neumáticos',
-  'Mantención Aire Acondicionado'
+  'Mantención Aire Acondicionado',
+  'Cambio Filtro Aire',
+  'Cambio Filtro Polen'
 ];
 
+// Equipamiento — algunos requieren cantidad
 const EQUIPAMIENTO_CATALOGO = [
-  'Pertiga Normal',
-  'Pertiga Full Led',
-  'Cuñas',
-  'Piola para cuñas',
-  'Porta cuñas',
-  'Checkpoint tipo gota',
-  'Baliza',
-  'Focos Mineros',
-  'Mallas elásticas'
+  { nombre: 'Pertiga Normal', requiereCantidad: false },
+  { nombre: 'Pertiga Full Led', requiereCantidad: false },
+  { nombre: 'Cuñas', requiereCantidad: false },
+  { nombre: 'Piola para cuñas', requiereCantidad: false },
+  { nombre: 'Porta cuñas', requiereCantidad: false },
+  { nombre: 'Checkpoint tipo gota', requiereCantidad: false },
+  { nombre: 'Baliza', requiereCantidad: false },
+  { nombre: 'Focos Mineros', requiereCantidad: false },
+  { nombre: 'Mallas elásticas', requiereCantidad: false },
+  { nombre: 'Cambio de Cinta Reflectante', requiereCantidad: true, unidad: 'metros', campo: 'cantidad_cinta_metros', tipo: 'decimal' },
+  { nombre: 'Cambio de Foco Trasero', requiereCantidad: true, unidad: 'unidades', campo: 'cantidad_focos_traseros', tipo: 'entero' },
+  { nombre: 'Cambio de Faroles Delanteros', requiereCantidad: true, unidad: 'unidades', campo: 'cantidad_faroles_delanteros', tipo: 'entero' }
 ];
 
 const TIPOS_VEHICULO = ['Camioneta', 'Camión', 'Bus', 'Minibus', 'Automóvil', 'SUV', 'Furgón', 'Maquinaria'];
@@ -40,6 +86,19 @@ function getPeriodoLabel(periodoKey) {
   return `${MESES[parseInt(month) - 1]} ${year}`;
 }
 
+// Determinar si una empresa/marca/modelo es "otro" (no está en el catálogo)
+function esEmpresaOtra(empresa) {
+  return empresa && !EMPRESAS_CATALOGO.includes(empresa);
+}
+function esMarcaOtra(marca) {
+  return marca && !MARCAS_LISTA.includes(marca);
+}
+function esModeloOtro(marca, modelo) {
+  if (!modelo) return false;
+  if (!MARCAS_LISTA.includes(marca)) return true; // marca es "otro", entonces modelo también es libre
+  return !MARCAS_CATALOGO[marca].includes(modelo);
+}
+
 function dbToApp(row) {
   return {
     id: row.id,
@@ -54,6 +113,9 @@ function dbToApp(row) {
     servicios_otros: row.servicios_otros || '',
     equipamiento: row.equipamiento || [],
     equipamiento_otros: row.equipamiento_otros || '',
+    cantidad_cinta_metros: row.cantidad_cinta_metros || '',
+    cantidad_focos_traseros: row.cantidad_focos_traseros || '',
+    cantidad_faroles_delanteros: row.cantidad_faroles_delanteros || '',
     cliente_entrega_fecha: row.cliente_entrega_fecha || '',
     cliente_entrega_hora: row.cliente_entrega_hora ? row.cliente_entrega_hora.slice(0, 5) : '',
     cliente_entrega_persona: row.cliente_entrega_persona || '',
@@ -83,6 +145,12 @@ function appToDb(data) {
   const timeFields = ['cliente_entrega_hora', 'luandi_recibe_hora', 'luandi_entrega_hora', 'cliente_recibe_hora'];
   [...dateFields, ...timeFields].forEach(f => {
     if (clean[f] === '') clean[f] = null;
+  });
+  // Campos numéricos: convertir vacíos a null
+  const numFields = ['cantidad_cinta_metros', 'cantidad_focos_traseros', 'cantidad_faroles_delanteros'];
+  numFields.forEach(f => {
+    if (clean[f] === '' || clean[f] === undefined) clean[f] = null;
+    else if (typeof clean[f] === 'string') clean[f] = Number(clean[f]);
   });
   return clean;
 }
@@ -251,6 +319,66 @@ function ConfirmModal({ title, message, confirmText, cancelText, confirmColor, o
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Componente: Select con opción "Otro" que permite escribir
+function SelectConOtro({ label, valor, opciones, onChange, placeholder, requerido }) {
+  const esOtro = valor && !opciones.includes(valor);
+  const [usandoOtro, setUsandoOtro] = useState(esOtro);
+
+  useEffect(() => {
+    setUsandoOtro(valor && !opciones.includes(valor));
+  }, [valor, opciones]);
+
+  const handleSelectChange = (e) => {
+    const v = e.target.value;
+    if (v === '__OTRO__') {
+      setUsandoOtro(true);
+      onChange('');
+    } else {
+      setUsandoOtro(false);
+      onChange(v);
+    }
+  };
+
+  return (
+    <div>
+      <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+      {!usandoOtro ? (
+        <select 
+          value={opciones.includes(valor) ? valor : ''} 
+          onChange={handleSelectChange} 
+          className="input"
+        >
+          <option value="">Seleccione...</option>
+          {opciones.map(o => <option key={o} value={o}>{o}</option>)}
+          <option value="__OTRO__">━━ Otro (escribir manualmente) ━━</option>
+        </select>
+      ) : (
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={valor}
+            onChange={e => onChange(e.target.value.toUpperCase())}
+            className="input flex-1"
+            placeholder={placeholder || 'Escriba el nombre'}
+            autoFocus
+          />
+          <button
+            type="button"
+            onClick={() => { setUsandoOtro(false); onChange(''); }}
+            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm flex items-center gap-1"
+            title="Volver a la lista"
+          >
+            <ChevronLeft size={14} /> Lista
+          </button>
+        </div>
+      )}
+      {usandoOtro && (
+        <p className="text-xs text-blue-600 mt-1">📝 Escribiendo manualmente (no está en la lista)</p>
+      )}
     </div>
   );
 }
@@ -442,7 +570,6 @@ export default function LuandiApp() {
     return matchPatente && matchEmpresa && matchEstado;
   });
 
-  // Detectar si hay filtros activos para nombre de archivo
   const filtrosActivos = () => {
     const partes = [];
     if (filterEmpresa) partes.push(filterEmpresa.replace(/[^a-zA-Z0-9]/g, '_'));
@@ -451,37 +578,49 @@ export default function LuandiApp() {
     return partes.join('_');
   };
 
+  // Función para construir filas del CSV con nuevas columnas
+  const construirFilaCSV = (i) => [
+    i.n_control,
+    new Date(i.fecha_creacion).toLocaleDateString('es-CL'),
+    i.estado === 'entregado' ? 'Entregado' : 'En proceso',
+    i.nombre_empresa || '',
+    i.patente || '',
+    i.tipo_vehiculo || '',
+    i.marca || '',
+    i.modelo || '',
+    i.kilometraje || '',
+    [...(i.servicios || []), i.servicios_otros].filter(Boolean).join('; '),
+    [...(i.equipamiento || []), i.equipamiento_otros].filter(Boolean).join('; '),
+    i.cantidad_cinta_metros || '',
+    i.cantidad_focos_traseros || '',
+    i.cantidad_faroles_delanteros || '',
+    i.cliente_entrega_fecha || '',
+    i.cliente_entrega_hora || '',
+    i.cliente_entrega_persona || '',
+    i.luandi_recibe_persona || '',
+    i.luandi_entrega_fecha || '',
+    i.luandi_entrega_hora || '',
+    i.luandi_entrega_persona || '',
+    i.cliente_recibe_persona || '',
+    (i.observaciones || '').replace(/\n/g, ' ')
+  ];
+
+  const HEADERS_CSV = [
+    'N°Control', 'Fecha Creación', 'Estado', 'Empresa', 'Patente', 'Tipo Vehículo', 'Marca', 'Modelo', 'Kilometraje',
+    'Servicios', 'Equipamiento',
+    'Cinta Reflectante (m)', 'Focos Traseros (un)', 'Faroles Delanteros (un)',
+    'Fecha Ingreso Cliente', 'Hora Ingreso Cliente', 'Entregado por (cliente)', 'Recibido por (Luandi)',
+    'Fecha Entrega Cliente', 'Hora Entrega Cliente', 'Entregado por (Luandi)', 'Recibido por (cliente)',
+    'Observaciones'
+  ];
+
   const exportarExcelFiltrado = () => {
     if (ingresosFiltrados.length === 0) {
       showToast('No hay registros con los filtros aplicados', 'info');
       return;
     }
-    const headers = ['N°Control', 'Fecha Creación', 'Estado', 'Empresa', 'Patente', 'Tipo Vehículo', 'Marca', 'Modelo', 'Kilometraje', 'Servicios', 'Equipamiento', 'Fecha Ingreso Cliente', 'Hora Ingreso Cliente', 'Entregado por (cliente)', 'Recibido por (Luandi)', 'Fecha Entrega Cliente', 'Hora Entrega Cliente', 'Entregado por (Luandi)', 'Recibido por (cliente)', 'Observaciones'];
-    
-    const rows = ingresosFiltrados.map(i => [
-      i.n_control,
-      new Date(i.fecha_creacion).toLocaleDateString('es-CL'),
-      i.estado === 'entregado' ? 'Entregado' : 'En proceso',
-      i.nombre_empresa || '',
-      i.patente || '',
-      i.tipo_vehiculo || '',
-      i.marca || '',
-      i.modelo || '',
-      i.kilometraje || '',
-      [...(i.servicios || []), i.servicios_otros].filter(Boolean).join('; '),
-      [...(i.equipamiento || []), i.equipamiento_otros].filter(Boolean).join('; '),
-      i.cliente_entrega_fecha || '',
-      i.cliente_entrega_hora || '',
-      i.cliente_entrega_persona || '',
-      i.luandi_recibe_persona || '',
-      i.luandi_entrega_fecha || '',
-      i.luandi_entrega_hora || '',
-      i.luandi_entrega_persona || '',
-      i.cliente_recibe_persona || '',
-      (i.observaciones || '').replace(/\n/g, ' ')
-    ]);
-
-    const csv = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const rows = ingresosFiltrados.map(construirFilaCSV);
+    const csv = [HEADERS_CSV, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -499,32 +638,8 @@ export default function LuandiApp() {
       showToast('No hay registros para exportar', 'info');
       return;
     }
-    const headers = ['N°Control', 'Fecha Creación', 'Estado', 'Empresa', 'Patente', 'Tipo Vehículo', 'Marca', 'Modelo', 'Kilometraje', 'Servicios', 'Equipamiento', 'Fecha Ingreso Cliente', 'Hora Ingreso Cliente', 'Entregado por (cliente)', 'Recibido por (Luandi)', 'Fecha Entrega Cliente', 'Hora Entrega Cliente', 'Entregado por (Luandi)', 'Recibido por (cliente)', 'Observaciones'];
-    
-    const rows = ingresos.map(i => [
-      i.n_control,
-      new Date(i.fecha_creacion).toLocaleDateString('es-CL'),
-      i.estado === 'entregado' ? 'Entregado' : 'En proceso',
-      i.nombre_empresa || '',
-      i.patente || '',
-      i.tipo_vehiculo || '',
-      i.marca || '',
-      i.modelo || '',
-      i.kilometraje || '',
-      [...(i.servicios || []), i.servicios_otros].filter(Boolean).join('; '),
-      [...(i.equipamiento || []), i.equipamiento_otros].filter(Boolean).join('; '),
-      i.cliente_entrega_fecha || '',
-      i.cliente_entrega_hora || '',
-      i.cliente_entrega_persona || '',
-      i.luandi_recibe_persona || '',
-      i.luandi_entrega_fecha || '',
-      i.luandi_entrega_hora || '',
-      i.luandi_entrega_persona || '',
-      i.cliente_recibe_persona || '',
-      (i.observaciones || '').replace(/\n/g, ' ')
-    ]);
-
-    const csv = [headers, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const rows = ingresos.map(construirFilaCSV);
+    const csv = [HEADERS_CSV, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -589,7 +704,7 @@ export default function LuandiApp() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <div className={`flex items-center gap-1 text-xs ${conectado ? 'text-green-600' : 'text-red-600'}`} title={conectado ? 'Conectado a la nube' : 'Sin conexión'}>
+            <div className={`flex items-center gap-1 text-xs ${conectado ? 'text-green-600' : 'text-red-600'}`}>
               {conectado ? <Cloud size={14} /> : <CloudOff size={14} />}
               <span className="hidden sm:inline">{conectado ? 'En línea' : 'Sin conexión'}</span>
             </div>
@@ -624,9 +739,7 @@ export default function LuandiApp() {
         <AlertModal title={alertModal.title} message={alertModal.message} onClose={() => setAlertModal(null)} />
       )}
 
-      {confirmModal && (
-        <ConfirmModal {...confirmModal} />
-      )}
+      {confirmModal && <ConfirmModal {...confirmModal} />}
 
       {mostrarSelectorPeriodo && (
         <SelectorPeriodo
@@ -784,25 +897,9 @@ function HomeView({ ingresos, ingresosDelPeriodo, periodoLabel, onNuevo, onHisto
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <ActionCard
-          onClick={onNuevo}
-          icon={<Plus size={28} />}
-          title="Nuevo Ingreso"
-          description="Registrar un nuevo vehículo ingresando al taller"
-          primary
-        />
-        <ActionCard
-          onClick={onHistorial}
-          icon={<ClipboardList size={28} />}
-          title="Historial"
-          description={`${ingresosDelPeriodo.length} ingresos en ${periodoLabel}`}
-        />
-        <ActionCard
-          onClick={onExportar}
-          icon={<Download size={28} />}
-          title="Exportar Todo"
-          description="Descargar consolidado completo de todos los registros"
-        />
+        <ActionCard onClick={onNuevo} icon={<Plus size={28} />} title="Nuevo Ingreso" description="Registrar un nuevo vehículo ingresando al taller" primary />
+        <ActionCard onClick={onHistorial} icon={<ClipboardList size={28} />} title="Historial" description={`${ingresosDelPeriodo.length} ingresos en ${periodoLabel}`} />
+        <ActionCard onClick={onExportar} icon={<Download size={28} />} title="Exportar Todo" description="Descargar consolidado completo de todos los registros" />
       </div>
 
       {ingresos.length > 0 && (
@@ -887,6 +984,9 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
     servicios_otros: '',
     equipamiento: [],
     equipamiento_otros: '',
+    cantidad_cinta_metros: '',
+    cantidad_focos_traseros: '',
+    cantidad_faroles_delanteros: '',
     cliente_entrega_fecha: new Date().toISOString().split('T')[0],
     cliente_entrega_hora: new Date().toTimeString().slice(0, 5),
     cliente_entrega_persona: '',
@@ -899,7 +999,19 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
     observaciones: ''
   });
 
-  const update = (field, value) => setData({ ...data, [field]: value });
+  const update = (field, value) => setData(prev => ({ ...prev, [field]: value }));
+
+  // Cambiar marca: si la nueva marca no tiene el modelo actual, limpiarlo
+  const updateMarca = (nuevaMarca) => {
+    setData(prev => {
+      const modeloValido = nuevaMarca && MARCAS_CATALOGO[nuevaMarca]?.includes(prev.modelo);
+      return {
+        ...prev,
+        marca: nuevaMarca,
+        modelo: modeloValido ? prev.modelo : ''
+      };
+    });
+  };
 
   const toggleServicio = (s) => {
     const arr = data.servicios || [];
@@ -908,8 +1020,22 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
 
   const toggleEquipamiento = (s) => {
     const arr = data.equipamiento || [];
-    update('equipamiento', arr.includes(s) ? arr.filter(x => x !== s) : [...arr, s]);
+    const yaEstaba = arr.includes(s);
+    update('equipamiento', yaEstaba ? arr.filter(x => x !== s) : [...arr, s]);
+    
+    // Si lo desmarca, limpiar la cantidad asociada
+    if (yaEstaba) {
+      const equipo = EQUIPAMIENTO_CATALOGO.find(e => e.nombre === s);
+      if (equipo && equipo.campo) {
+        update(equipo.campo, '');
+      }
+    }
   };
+
+  // Modelos disponibles según marca seleccionada
+  const modelosDisponibles = data.marca && MARCAS_CATALOGO[data.marca] 
+    ? MARCAS_CATALOGO[data.marca] 
+    : [];
 
   const puedeAvanzar = () => {
     if (step === 1) return data.nombre_empresa && data.patente && data.tipo_vehiculo && data.marca;
@@ -919,7 +1045,22 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
   };
 
   const intentarGuardar = () => {
-    // Si es nuevo ingreso, validar firma de ingreso
+    // Validar cantidades de equipamiento
+    for (const equipo of EQUIPAMIENTO_CATALOGO) {
+      if (equipo.requiereCantidad && (data.equipamiento || []).includes(equipo.nombre)) {
+        const cantidad = data[equipo.campo];
+        if (!cantidad || Number(cantidad) <= 0) {
+          showAlert(
+            `Falta la cantidad de ${equipo.nombre}`,
+            `Marcó "${equipo.nombre}" pero no indicó la cantidad de ${equipo.unidad}.\n\nIndique la cantidad en el paso 2 (Servicios) o desmarque el equipamiento.`
+          );
+          setStep(2);
+          return;
+        }
+      }
+    }
+
+    // Validar firma de ingreso (solo nuevos)
     if (!ingreso) {
       const tieneFirma = !!data.cliente_entrega_firma;
       const marcoSinFirma = !!data.cliente_entrega_sin_firma;
@@ -1014,9 +1155,13 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
           <SectionTitle icon={<Building2 size={18} />} title="Datos de Ingreso" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Nombre Empresa *">
-              <input type="text" value={data.nombre_empresa} onChange={e => update('nombre_empresa', e.target.value)} className="input" placeholder="Ej: Minera Los Pelambres" />
-            </Field>
+            <SelectConOtro
+              label="Nombre Empresa *"
+              valor={data.nombre_empresa}
+              opciones={EMPRESAS_CATALOGO}
+              onChange={(v) => update('nombre_empresa', v)}
+              placeholder="Nombre de la empresa"
+            />
             <Field label="N° Patente *">
               <input type="text" value={data.patente} onChange={e => update('patente', e.target.value.toUpperCase())} className="input" placeholder="AB-CD-12" />
             </Field>
@@ -1026,16 +1171,30 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
                 {TIPOS_VEHICULO.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </Field>
-            <Field label="Marca *">
-              <input type="text" value={data.marca} onChange={e => update('marca', e.target.value)} className="input" placeholder="Ej: Toyota" />
-            </Field>
-            <Field label="Modelo">
-              <input type="text" value={data.modelo} onChange={e => update('modelo', e.target.value)} className="input" placeholder="Ej: Hilux 2023" />
-            </Field>
+            <SelectConOtro
+              label="Marca *"
+              valor={data.marca}
+              opciones={MARCAS_LISTA}
+              onChange={updateMarca}
+              placeholder="Marca del vehículo"
+            />
+            <SelectConOtro
+              label="Modelo"
+              valor={data.modelo}
+              opciones={modelosDisponibles}
+              onChange={(v) => update('modelo', v)}
+              placeholder={data.marca ? `Modelo de ${data.marca}` : 'Modelo del vehículo'}
+            />
             <Field label="Kilometraje">
               <input type="number" value={data.kilometraje} onChange={e => update('kilometraje', e.target.value)} className="input" placeholder="Ej: 45000" />
             </Field>
           </div>
+          {data.marca && modelosDisponibles.length === 0 && !data.modelo && (
+            <div className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-2">
+              <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+              <span>La marca <strong>{data.marca}</strong> no tiene modelos predefinidos. Use la opción "Otro" para escribir el modelo manualmente.</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -1057,10 +1216,39 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
 
           <div className="bg-white rounded-xl border border-slate-200 p-5">
             <SectionTitle icon={<Wrench size={18} />} title="Equipamiento (cambio)" />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
-              {EQUIPAMIENTO_CATALOGO.map(s => (
-                <CheckItem key={s} label={s} checked={(data.equipamiento || []).includes(s)} onChange={() => toggleEquipamiento(s)} />
-              ))}
+            <p className="text-xs text-slate-500 mt-2">Algunos equipamientos requieren indicar cantidad (ej: metros o unidades).</p>
+            <div className="grid grid-cols-1 gap-2 mt-3">
+              {EQUIPAMIENTO_CATALOGO.map(equipo => {
+                const marcado = (data.equipamiento || []).includes(equipo.nombre);
+                return (
+                  <div key={equipo.nombre}>
+                    <CheckItem
+                      label={equipo.requiereCantidad ? `${equipo.nombre} (requiere cantidad en ${equipo.unidad})` : equipo.nombre}
+                      checked={marcado}
+                      onChange={() => toggleEquipamiento(equipo.nombre)}
+                    />
+                    {marcado && equipo.requiereCantidad && (
+                      <div className="ml-7 mt-2 mb-1 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <label className="text-xs font-medium text-blue-900 block mb-1">
+                          Cantidad de {equipo.unidad} *
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            step={equipo.tipo === 'decimal' ? '0.1' : '1'}
+                            min="0"
+                            value={data[equipo.campo] || ''}
+                            onChange={e => update(equipo.campo, e.target.value)}
+                            className="input max-w-[150px]"
+                            placeholder="0"
+                          />
+                          <span className="text-sm text-blue-900 font-medium">{equipo.unidad}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
             <div className="mt-3">
               <Field label="Otro equipamiento">
@@ -1364,11 +1552,7 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving, showAlert }
 
       <div className="flex flex-col sm:flex-row gap-2 sm:justify-between">
         <button onClick={onCancelar} disabled={saving} className="btn-secondary order-2 sm:order-1 disabled:opacity-50">Cancelar</button>
-        <button
-          onClick={intentarGuardar}
-          disabled={saving}
-          className="btn-primary order-1 sm:order-2 disabled:opacity-50"
-        >
+        <button onClick={intentarGuardar} disabled={saving} className="btn-primary order-1 sm:order-2 disabled:opacity-50">
           {saving ? <><Loader2 size={16} className="animate-spin" /> Guardando...</> : <><Check size={16} /> Confirmar entrega</>}
         </button>
       </div>
@@ -1391,7 +1575,7 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
-            <button onClick={onPDFRespaldos} className="btn-secondary" title={hayFiltros ? 'Generar PDF con los respaldos filtrados' : 'Generar PDF con todos los respaldos del mes'}>
+            <button onClick={onPDFRespaldos} className="btn-secondary">
               <FileText size={16} /> <span className="hidden sm:inline">PDF respaldos</span> ({ingresos.length})
             </button>
             <button onClick={onExportarPeriodo} className="btn-secondary">
@@ -1425,23 +1609,11 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={filterPatente}
-              onChange={e => setFilterPatente(e.target.value)}
-              placeholder="Buscar por patente..."
-              className="input pl-9"
-            />
+            <input type="text" value={filterPatente} onChange={e => setFilterPatente(e.target.value)} placeholder="Buscar por patente..." className="input pl-9" />
           </div>
           <div className="relative">
             <Building2 size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={filterEmpresa}
-              onChange={e => setFilterEmpresa(e.target.value)}
-              placeholder="Buscar por empresa..."
-              className="input pl-9"
-            />
+            <input type="text" value={filterEmpresa} onChange={e => setFilterEmpresa(e.target.value)} placeholder="Buscar por empresa..." className="input pl-9" />
           </div>
           <select value={filterEstado} onChange={e => setFilterEstado(e.target.value)} className="input">
             <option value="todos">Todos los estados</option>
@@ -1450,10 +1622,7 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
           </select>
         </div>
         {hayFiltros && (
-          <button
-            onClick={() => { setFilterPatente(''); setFilterEmpresa(''); setFilterEstado('todos'); }}
-            className="mt-3 text-xs text-blue-700 hover:text-blue-900 flex items-center gap-1"
-          >
+          <button onClick={() => { setFilterPatente(''); setFilterEmpresa(''); setFilterEstado('todos'); }} className="mt-3 text-xs text-blue-700 hover:text-blue-900 flex items-center gap-1">
             <X size={12} /> Limpiar filtros
           </button>
         )}
@@ -1601,7 +1770,16 @@ function DetalleView({ ingreso, onVolver, onPDF, onEntregar, onEditar, onReverti
               <p className="text-sm text-slate-400">Ninguno marcado</p>
             ) : (
               <ul className="text-sm text-slate-700 space-y-0.5">
-                {(ingreso.equipamiento || []).map(s => <li key={s}>• {s}</li>)}
+                {(ingreso.equipamiento || []).map(s => {
+                  const equipo = EQUIPAMIENTO_CATALOGO.find(e => e.nombre === s);
+                  const cantidad = equipo && equipo.campo ? ingreso[equipo.campo] : null;
+                  return (
+                    <li key={s}>
+                      • {s}
+                      {cantidad && <span className="font-semibold text-blue-700"> — {cantidad} {equipo.unidad}</span>}
+                    </li>
+                  );
+                })}
                 {ingreso.equipamiento_otros && <li>• {ingreso.equipamiento_otros}</li>}
               </ul>
             )}
@@ -1736,9 +1914,15 @@ function generarBloqueReporteIndividual(i, pageBreakAntes = false) {
   const servicios = SERVICIOS_CATALOGO.map(s => `
     <tr><td>${s}</td><td style="text-align:center;width:30px">${(i.servicios || []).includes(s) ? '✓' : ''}</td></tr>
   `).join('');
-  const equipos = EQUIPAMIENTO_CATALOGO.map(s => `
-    <tr><td>${s}</td><td style="text-align:center;width:30px">${(i.equipamiento || []).includes(s) ? '✓' : ''}</td></tr>
-  `).join('');
+  
+  const equipos = EQUIPAMIENTO_CATALOGO.map(eq => {
+    const marcado = (i.equipamiento || []).includes(eq.nombre);
+    const cantidad = eq.campo ? i[eq.campo] : null;
+    const cantidadHTML = (marcado && cantidad) 
+      ? ` <b style="color:#1e40af">— ${cantidad} ${eq.unidad}</b>` 
+      : '';
+    return `<tr><td>${eq.nombre}${cantidadHTML}</td><td style="text-align:center;width:30px">${marcado ? '✓' : ''}</td></tr>`;
+  }).join('');
 
   const firmaIngresoHTML = i.cliente_entrega_firma
     ? `<img src="${i.cliente_entrega_firma}" class="firma-img" />`
