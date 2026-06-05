@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock, Loader2, Cloud, CloudOff, FolderOpen, AlertTriangle } from 'lucide-react';
+import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock, Loader2, Cloud, CloudOff, FolderOpen, AlertTriangle, Lock, RotateCcw } from 'lucide-react';
 import { supabase } from './supabase';
 
 const SERVICIOS_CATALOGO = [
@@ -87,7 +87,7 @@ function appToDb(data) {
   return clean;
 }
 
-function SignaturePad({ value, onChange, label }) {
+function SignaturePad({ value, onChange, label, readOnly = false }) {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(!!value);
@@ -111,7 +111,7 @@ function SignaturePad({ value, onChange, label }) {
       img.src = value;
       setHasSignature(true);
     }
-  }, []);
+  }, [value]);
 
   const getCoords = (e) => {
     const canvas = canvasRef.current;
@@ -123,6 +123,7 @@ function SignaturePad({ value, onChange, label }) {
   };
 
   const startDrawing = (e) => {
+    if (readOnly) return;
     e.preventDefault();
     setIsDrawing(true);
     const { x, y } = getCoords(e);
@@ -132,7 +133,7 @@ function SignaturePad({ value, onChange, label }) {
   };
 
   const draw = (e) => {
-    if (!isDrawing) return;
+    if (!isDrawing || readOnly) return;
     e.preventDefault();
     const { x, y } = getCoords(e);
     const ctx = canvasRef.current.getContext('2d');
@@ -141,7 +142,7 @@ function SignaturePad({ value, onChange, label }) {
   };
 
   const stopDrawing = () => {
-    if (!isDrawing) return;
+    if (!isDrawing || readOnly) return;
     setIsDrawing(false);
     setHasSignature(true);
     const dataUrl = canvasRef.current.toDataURL('image/png');
@@ -149,6 +150,7 @@ function SignaturePad({ value, onChange, label }) {
   };
 
   const clear = () => {
+    if (readOnly) return;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -159,17 +161,20 @@ function SignaturePad({ value, onChange, label }) {
   return (
     <div>
       <div className="flex justify-between items-center mb-1">
-        <label className="text-xs font-medium text-slate-600">{label}</label>
-        {hasSignature && (
+        <label className="text-xs font-medium text-slate-600 flex items-center gap-1">
+          {label}
+          {readOnly && <Lock size={11} className="text-slate-400" />}
+        </label>
+        {hasSignature && !readOnly && (
           <button type="button" onClick={clear} className="text-xs text-red-600 hover:text-red-700 flex items-center gap-1">
             <Trash2 size={12} /> Limpiar
           </button>
         )}
       </div>
-      <div className="relative border-2 border-dashed border-slate-300 rounded-lg bg-white">
+      <div className={`relative border-2 ${readOnly ? 'border-slate-200 bg-slate-50' : 'border-dashed border-slate-300 bg-white'} rounded-lg`}>
         <canvas
           ref={canvasRef}
-          className="w-full h-32 touch-none cursor-crosshair rounded-lg"
+          className={`w-full h-32 rounded-lg ${readOnly ? 'cursor-not-allowed' : 'touch-none cursor-crosshair'}`}
           onMouseDown={startDrawing}
           onMouseMove={draw}
           onMouseUp={stopDrawing}
@@ -178,17 +183,26 @@ function SignaturePad({ value, onChange, label }) {
           onTouchMove={draw}
           onTouchEnd={stopDrawing}
         />
-        {!hasSignature && (
+        {!hasSignature && !readOnly && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-slate-400 text-sm">
             <PenLine size={16} className="mr-2" /> Firme aquí
           </div>
         )}
+        {!hasSignature && readOnly && (
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-slate-400 text-sm">
+            Sin firma registrada
+          </div>
+        )}
       </div>
+      {readOnly && (
+        <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+          <Lock size={11} /> Firma protegida. No se puede modificar después de registrada.
+        </p>
+      )}
     </div>
   );
 }
 
-// Modal de alerta para validaciones
 function AlertModal({ title, message, onClose }) {
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
@@ -210,6 +224,37 @@ function AlertModal({ title, message, onClose }) {
   );
 }
 
+function ConfirmModal({ title, message, confirmText, cancelText, confirmColor, onConfirm, onCancel }) {
+  const colors = {
+    red: 'bg-red-600 hover:bg-red-700',
+    amber: 'bg-amber-600 hover:bg-amber-700',
+    blue: 'bg-blue-700 hover:bg-blue-800'
+  };
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onCancel}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start gap-3 mb-4">
+          <div className={`w-10 h-10 ${confirmColor === 'red' ? 'bg-red-100' : 'bg-amber-100'} rounded-full flex items-center justify-center flex-shrink-0`}>
+            <AlertTriangle className={confirmColor === 'red' ? 'text-red-600' : 'text-amber-600'} size={22} />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-bold text-slate-900 text-lg">{title}</h3>
+            <p className="text-sm text-slate-600 mt-1 whitespace-pre-wrap">{message}</p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={onCancel} className="flex-1 btn-secondary justify-center">
+            {cancelText || 'Cancelar'}
+          </button>
+          <button onClick={onConfirm} className={`flex-1 px-4 py-2 ${colors[confirmColor || 'blue']} text-white rounded-lg text-sm font-medium`}>
+            {confirmText || 'Confirmar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LuandiApp() {
   const [view, setView] = useState('home');
   const [ingresos, setIngresos] = useState([]);
@@ -224,6 +269,7 @@ export default function LuandiApp() {
   const [mostrarSelectorPeriodo, setMostrarSelectorPeriodo] = useState(false);
   const [toast, setToast] = useState(null);
   const [alertModal, setAlertModal] = useState(null);
+  const [confirmModal, setConfirmModal] = useState(null);
 
   const cargarIngresos = async () => {
     try {
@@ -263,6 +309,10 @@ export default function LuandiApp() {
 
   const showAlert = (title, message) => {
     setAlertModal({ title, message });
+  };
+
+  const showConfirm = (config) => {
+    setConfirmModal(config);
   };
 
   const obtenerSiguienteNumero = async () => {
@@ -324,16 +374,52 @@ export default function LuandiApp() {
   };
 
   const eliminarIngreso = async (id) => {
-    if (!confirm('¿Eliminar este registro? Esta acción no se puede deshacer.')) return;
-    try {
-      const { error } = await supabase.from('ingresos').delete().eq('id', id);
-      if (error) throw error;
-      showToast('Registro eliminado', 'info');
-      await cargarIngresos();
-    } catch (e) {
-      console.error('Error eliminando:', e);
-      showToast('Error al eliminar: ' + e.message, 'error');
-    }
+    showConfirm({
+      title: '¿Eliminar registro?',
+      message: 'Esta acción no se puede deshacer. El registro se eliminará permanentemente de la base de datos.',
+      confirmText: 'Eliminar',
+      cancelText: 'Cancelar',
+      confirmColor: 'red',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          const { error } = await supabase.from('ingresos').delete().eq('id', id);
+          if (error) throw error;
+          showToast('Registro eliminado', 'info');
+          await cargarIngresos();
+        } catch (e) {
+          console.error('Error eliminando:', e);
+          showToast('Error al eliminar: ' + e.message, 'error');
+        }
+      },
+      onCancel: () => setConfirmModal(null)
+    });
+  };
+
+  const revertirEstado = async (ingreso) => {
+    showConfirm({
+      title: '¿Revertir entrega?',
+      message: `El ingreso N°${ingreso.n_control} volverá al estado "En proceso".\n\nLas firmas y datos de entrega se conservarán por si necesita re-confirmar la entrega más adelante.\n\n¿Continuar?`,
+      confirmText: 'Sí, revertir',
+      cancelText: 'Cancelar',
+      confirmColor: 'amber',
+      onConfirm: async () => {
+        setConfirmModal(null);
+        try {
+          const { error } = await supabase
+            .from('ingresos')
+            .update({ estado: 'en_proceso' })
+            .eq('id', ingreso.id);
+          if (error) throw error;
+          showToast(`Ingreso N°${ingreso.n_control} revertido a "En proceso"`, 'info');
+          await cargarIngresos();
+        } catch (e) {
+          console.error('Error revirtiendo:', e);
+          showToast('Error al revertir: ' + e.message, 'error');
+        }
+      },
+      onCancel: () => setConfirmModal(null)
+    });
   };
 
   const periodosDisponibles = (() => {
@@ -356,14 +442,23 @@ export default function LuandiApp() {
     return matchPatente && matchEmpresa && matchEstado;
   });
 
-  const exportarExcelPeriodo = () => {
-    if (ingresosDelPeriodo.length === 0) {
-      showToast('No hay registros en este período para exportar', 'info');
+  // Detectar si hay filtros activos para nombre de archivo
+  const filtrosActivos = () => {
+    const partes = [];
+    if (filterEmpresa) partes.push(filterEmpresa.replace(/[^a-zA-Z0-9]/g, '_'));
+    if (filterPatente) partes.push(filterPatente.replace(/[^a-zA-Z0-9]/g, '_'));
+    if (filterEstado !== 'todos') partes.push(filterEstado === 'entregado' ? 'Entregados' : 'EnProceso');
+    return partes.join('_');
+  };
+
+  const exportarExcelFiltrado = () => {
+    if (ingresosFiltrados.length === 0) {
+      showToast('No hay registros con los filtros aplicados', 'info');
       return;
     }
     const headers = ['N°Control', 'Fecha Creación', 'Estado', 'Empresa', 'Patente', 'Tipo Vehículo', 'Marca', 'Modelo', 'Kilometraje', 'Servicios', 'Equipamiento', 'Fecha Ingreso Cliente', 'Hora Ingreso Cliente', 'Entregado por (cliente)', 'Recibido por (Luandi)', 'Fecha Entrega Cliente', 'Hora Entrega Cliente', 'Entregado por (Luandi)', 'Recibido por (cliente)', 'Observaciones'];
     
-    const rows = ingresosDelPeriodo.map(i => [
+    const rows = ingresosFiltrados.map(i => [
       i.n_control,
       new Date(i.fecha_creacion).toLocaleDateString('es-CL'),
       i.estado === 'entregado' ? 'Entregado' : 'En proceso',
@@ -392,10 +487,11 @@ export default function LuandiApp() {
     const a = document.createElement('a');
     a.href = url;
     const periodoLabel = getPeriodoLabel(periodoSeleccionado).replace(' ', '_');
-    a.download = `Luandi_Ingresos_${periodoLabel}.csv`;
+    const filtros = filtrosActivos();
+    a.download = `Luandi_Ingresos_${periodoLabel}${filtros ? '_' + filtros : ''}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    showToast(`${ingresosDelPeriodo.length} registros exportados (${getPeriodoLabel(periodoSeleccionado)})`);
+    showToast(`${ingresosFiltrados.length} registros exportados`);
   };
 
   const exportarExcelTodo = () => {
@@ -451,9 +547,9 @@ export default function LuandiApp() {
     setTimeout(() => win.print(), 500);
   };
 
-  const generarPDFRespaldosMes = () => {
-    if (ingresosDelPeriodo.length === 0) {
-      showToast('No hay registros en este período para generar PDF', 'info');
+  const generarPDFRespaldosFiltrados = () => {
+    if (ingresosFiltrados.length === 0) {
+      showToast('No hay registros con los filtros aplicados', 'info');
       return;
     }
     const win = window.open('', '_blank');
@@ -461,9 +557,8 @@ export default function LuandiApp() {
       showToast('Permita ventanas emergentes para descargar el PDF', 'error');
       return;
     }
-    // Ordenar por número de control ascendente
-    const ordenados = [...ingresosDelPeriodo].sort((a, b) => a.n_control - b.n_control);
-    const html = generarHTMLRespaldosMes(ordenados, getPeriodoLabel(periodoSeleccionado));
+    const ordenados = [...ingresosFiltrados].sort((a, b) => a.n_control - b.n_control);
+    const html = generarHTMLRespaldosMes(ordenados, getPeriodoLabel(periodoSeleccionado), filterEmpresa);
     win.document.write(html);
     win.document.close();
     setTimeout(() => win.print(), 800);
@@ -529,6 +624,10 @@ export default function LuandiApp() {
         <AlertModal title={alertModal.title} message={alertModal.message} onClose={() => setAlertModal(null)} />
       )}
 
+      {confirmModal && (
+        <ConfirmModal {...confirmModal} />
+      )}
+
       {mostrarSelectorPeriodo && (
         <SelectorPeriodo
           periodos={periodosDisponibles}
@@ -574,9 +673,10 @@ export default function LuandiApp() {
             onVer={(i) => { setSelectedIngreso(i); setView('detalle'); }}
             onEntregar={(i) => { setSelectedIngreso(i); setView('entrega'); }}
             onEditar={(i) => { setSelectedIngreso(i); setView('nuevo'); }}
+            onRevertir={revertirEstado}
             onEliminar={eliminarIngreso}
-            onExportarPeriodo={exportarExcelPeriodo}
-            onPDFRespaldos={generarPDFRespaldosMes}
+            onExportarPeriodo={exportarExcelFiltrado}
+            onPDFRespaldos={generarPDFRespaldosFiltrados}
             onNuevo={() => { setSelectedIngreso(null); setView('nuevo'); }}
           />
         )}
@@ -586,6 +686,8 @@ export default function LuandiApp() {
             onVolver={() => setView('historial')}
             onPDF={() => generarPDF(selectedIngreso)}
             onEntregar={() => setView('entrega')}
+            onEditar={() => setView('nuevo')}
+            onRevertir={() => revertirEstado(selectedIngreso)}
           />
         )}
         {view === 'entrega' && selectedIngreso && (
@@ -773,6 +875,7 @@ function EstadoBadge({ estado }) {
 
 function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }) {
   const [step, setStep] = useState(1);
+  const esEntregado = ingreso && ingreso.estado === 'entregado';
   const [data, setData] = useState(ingreso || {
     nombre_empresa: '',
     patente: '',
@@ -815,40 +918,51 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
     return true;
   };
 
-  // Validación antes de guardar
   const intentarGuardar = () => {
-    // Validar firma de ingreso
-    const tieneFirma = !!data.cliente_entrega_firma;
-    const marcoSinFirma = !!data.cliente_entrega_sin_firma;
-    const tieneMotivo = !!(data.cliente_entrega_motivo_sin_firma && data.cliente_entrega_motivo_sin_firma.trim());
+    // Si es nuevo ingreso, validar firma de ingreso
+    if (!ingreso) {
+      const tieneFirma = !!data.cliente_entrega_firma;
+      const marcoSinFirma = !!data.cliente_entrega_sin_firma;
+      const tieneMotivo = !!(data.cliente_entrega_motivo_sin_firma && data.cliente_entrega_motivo_sin_firma.trim());
 
-    if (!tieneFirma && !marcoSinFirma) {
-      showAlert(
-        'Falta la firma del cliente',
-        'Por favor solicite la firma del cliente en el paso 3 (Recepción).\n\nSi el cliente no puede firmar en este momento, marque la casilla "El cliente no firmó" e indique el motivo.'
-      );
-      setStep(3);
-      return;
-    }
+      if (!tieneFirma && !marcoSinFirma) {
+        showAlert(
+          'Falta la firma del cliente',
+          'Por favor solicite la firma del cliente en el paso 3 (Recepción).\n\nSi el cliente no puede firmar en este momento, marque la casilla "El cliente no firmó" e indique el motivo.'
+        );
+        setStep(3);
+        return;
+      }
 
-    if (marcoSinFirma && !tieneMotivo) {
-      showAlert(
-        'Indique el motivo',
-        'Marcó que el cliente no firmó. Debe indicar el motivo por el cual no se obtuvo la firma de ingreso.'
-      );
-      setStep(3);
-      return;
+      if (marcoSinFirma && !tieneMotivo) {
+        showAlert(
+          'Indique el motivo',
+          'Marcó que el cliente no firmó. Debe indicar el motivo por el cual no se obtuvo la firma de ingreso.'
+        );
+        setStep(3);
+        return;
+      }
     }
 
     onGuardar(data);
   };
 
-  const steps = [
-    { num: 1, label: 'Vehículo', icon: <Car size={16} /> },
-    { num: 2, label: 'Servicios', icon: <Wrench size={16} /> },
-    { num: 3, label: 'Recepción', icon: <PenLine size={16} /> },
-    { num: 4, label: 'Observaciones', icon: <FileText size={16} /> }
-  ];
+  const steps = esEntregado
+    ? [
+        { num: 1, label: 'Vehículo', icon: <Car size={16} /> },
+        { num: 2, label: 'Servicios', icon: <Wrench size={16} /> },
+        { num: 3, label: 'Recepción', icon: <PenLine size={16} /> },
+        { num: 4, label: 'Entrega', icon: <CheckCircle2 size={16} /> },
+        { num: 5, label: 'Observaciones', icon: <FileText size={16} /> }
+      ]
+    : [
+        { num: 1, label: 'Vehículo', icon: <Car size={16} /> },
+        { num: 2, label: 'Servicios', icon: <Wrench size={16} /> },
+        { num: 3, label: 'Recepción', icon: <PenLine size={16} /> },
+        { num: 4, label: 'Observaciones', icon: <FileText size={16} /> }
+      ];
+
+  const totalSteps = esEntregado ? 5 : 4;
 
   return (
     <div className="space-y-5">
@@ -861,8 +975,18 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
         </div>
       </div>
 
+      {esEntregado && (
+        <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="text-amber-600 flex-shrink-0 mt-0.5" size={22} />
+          <div className="flex-1">
+            <p className="font-medium text-amber-900">Editando un ingreso ya entregado</p>
+            <p className="text-sm text-amber-800 mt-1">Los datos administrativos se pueden modificar. Las firmas registradas están protegidas y no se pueden cambiar para mantener la validez legal del respaldo.</p>
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between overflow-x-auto">
           {steps.map((s, idx) => (
             <React.Fragment key={s.num}>
               <button
@@ -965,31 +1089,32 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
                 {!data.cliente_entrega_sin_firma ? (
                   <>
                     <SignaturePad
-                      label="Firma del cliente (entrega) *"
+                      label={`Firma del cliente (entrega) ${ingreso ? '' : '*'}`}
                       value={data.cliente_entrega_firma}
                       onChange={(v) => update('cliente_entrega_firma', v)}
+                      readOnly={esEntregado && !!data.cliente_entrega_firma}
                     />
-                    <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setData(prev => ({
-                            ...prev,
-                            cliente_entrega_sin_firma: true,
-                            cliente_entrega_firma: ''
-                          }));
-                        }}
-                        className="w-full text-left flex items-start gap-3 cursor-pointer hover:bg-amber-100 -m-1 p-1 rounded transition-colors"
-                      >
-                        <div className="w-5 h-5 border-2 border-amber-600 rounded bg-white flex-shrink-0 mt-0.5 flex items-center justify-center">
-                          {/* vacío - no marcado */}
-                        </div>
-                        <div className="text-xs text-amber-900 flex-1">
-                          <span className="font-medium block">El cliente no firmó en el momento del ingreso</span>
-                          <span className="text-amber-700 block mt-0.5">Toque aquí solo si no fue posible obtener la firma. Deberá indicar el motivo.</span>
-                        </div>
-                      </button>
-                    </div>
+                    {!esEntregado && !data.cliente_entrega_firma && (
+                      <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setData(prev => ({
+                              ...prev,
+                              cliente_entrega_sin_firma: true,
+                              cliente_entrega_firma: ''
+                            }));
+                          }}
+                          className="w-full text-left flex items-start gap-3 cursor-pointer hover:bg-amber-100 -m-1 p-1 rounded transition-colors"
+                        >
+                          <div className="w-5 h-5 border-2 border-amber-600 rounded bg-white flex-shrink-0 mt-0.5"></div>
+                          <div className="text-xs text-amber-900 flex-1">
+                            <span className="font-medium block">El cliente no firmó en el momento del ingreso</span>
+                            <span className="text-amber-700 block mt-0.5">Toque aquí solo si no fue posible obtener la firma. Deberá indicar el motivo.</span>
+                          </div>
+                        </button>
+                      </div>
+                    )}
                   </>
                 ) : (
                   <div className="p-4 bg-amber-50 border border-amber-300 rounded-lg space-y-3">
@@ -1005,22 +1130,25 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
                         value={data.cliente_entrega_motivo_sin_firma}
                         onChange={e => update('cliente_entrega_motivo_sin_firma', e.target.value)}
                         className="input min-h-[80px] resize-y"
-                        placeholder="Ej: El chofer dejó el vehículo y se retiró sin esperar el registro. / Cliente envió vehículo por terceros sin acompañante."
+                        placeholder="Ej: El chofer dejó el vehículo y se retiró sin esperar el registro."
+                        disabled={esEntregado}
                       />
                     </Field>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setData(prev => ({
-                          ...prev,
-                          cliente_entrega_sin_firma: false,
-                          cliente_entrega_motivo_sin_firma: ''
-                        }));
-                      }}
-                      className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-amber-400 text-amber-800 hover:bg-amber-100 hover:border-amber-500 rounded-md text-xs font-medium cursor-pointer transition-colors"
-                    >
-                      <ChevronLeft size={14} /> Volver a solicitar firma
-                    </button>
+                    {!esEntregado && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setData(prev => ({
+                            ...prev,
+                            cliente_entrega_sin_firma: false,
+                            cliente_entrega_motivo_sin_firma: ''
+                          }));
+                        }}
+                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-amber-400 text-amber-800 hover:bg-amber-100 hover:border-amber-500 rounded-md text-xs font-medium cursor-pointer transition-colors"
+                      >
+                        <ChevronLeft size={14} /> Volver a solicitar firma
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1044,17 +1172,69 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
         </div>
       )}
 
-      {step === 4 && (
+      {esEntregado && step === 4 && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-slate-200 p-5">
+            <SectionTitle icon={<Wrench size={18} />} title="Personal Luandi entrega el vehículo" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
+              <Field label="Fecha">
+                <input type="date" value={data.luandi_entrega_fecha} onChange={e => update('luandi_entrega_fecha', e.target.value)} className="input" />
+              </Field>
+              <Field label="Hora">
+                <input type="time" value={data.luandi_entrega_hora} onChange={e => update('luandi_entrega_hora', e.target.value)} className="input" />
+              </Field>
+              <Field label="Entregado por (Luandi)" className="sm:col-span-2">
+                <input type="text" value={data.luandi_entrega_persona} onChange={e => update('luandi_entrega_persona', e.target.value)} className="input" placeholder="Nombre del personal Luandi" />
+              </Field>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 p-5">
+            <SectionTitle icon={<Building2 size={18} />} title="Cliente recibe el vehículo" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
+              <Field label="Fecha">
+                <input type="date" value={data.cliente_recibe_fecha} onChange={e => update('cliente_recibe_fecha', e.target.value)} className="input" />
+              </Field>
+              <Field label="Hora">
+                <input type="time" value={data.cliente_recibe_hora} onChange={e => update('cliente_recibe_hora', e.target.value)} className="input" />
+              </Field>
+              <Field label="Recibido por (cliente)" className="sm:col-span-2">
+                <input type="text" value={data.cliente_recibe_persona} onChange={e => update('cliente_recibe_persona', e.target.value)} className="input" placeholder="Nombre completo de quien retira el vehículo" />
+              </Field>
+              <div className="sm:col-span-2">
+                <SignaturePad
+                  label="Firma del cliente (conformidad de retiro)"
+                  value={data.cliente_recibe_firma}
+                  onChange={(v) => update('cliente_recibe_firma', v)}
+                  readOnly={!!data.cliente_recibe_firma}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {((esEntregado && step === 5) || (!esEntregado && step === 4)) && (
         <div className="bg-white rounded-xl border border-slate-200 p-5">
           <SectionTitle icon={<FileText size={18} />} title="Observaciones" />
-          <Field label="Comentarios o detalles adicionales">
+          <Field label="Comentarios o detalles adicionales al ingreso">
             <textarea
               value={data.observaciones}
               onChange={e => update('observaciones', e.target.value)}
-              className="input min-h-[140px] resize-y"
+              className="input min-h-[100px] resize-y"
               placeholder="Anote cualquier observación relevante: estado del vehículo, hallazgos, recomendaciones, etc."
             />
           </Field>
+          {esEntregado && (
+            <Field label="Observaciones de entrega" className="mt-3">
+              <textarea
+                value={data.observaciones_entrega || ''}
+                onChange={e => update('observaciones_entrega', e.target.value)}
+                className="input min-h-[100px] resize-y"
+                placeholder="Observaciones al momento del retiro"
+              />
+            </Field>
+          )}
           <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
             <p className="text-sm text-blue-900 font-medium mb-2">Resumen del ingreso</p>
             <div className="text-xs text-blue-800 space-y-1">
@@ -1072,7 +1252,7 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
         <button onClick={onCancelar} disabled={saving} className="btn-secondary order-2 sm:order-1 disabled:opacity-50">Cancelar</button>
         <div className="flex gap-2 order-1 sm:order-2">
           {step > 1 && <button onClick={() => setStep(step - 1)} disabled={saving} className="btn-secondary flex-1 sm:flex-none disabled:opacity-50"><ChevronLeft size={16} /> Anterior</button>}
-          {step < 4 && (
+          {step < totalSteps && (
             <button
               onClick={() => puedeAvanzar() && setStep(step + 1)}
               disabled={!puedeAvanzar() || saving}
@@ -1081,9 +1261,9 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
               Siguiente <ChevronRight size={16} />
             </button>
           )}
-          {step === 4 && (
+          {step === totalSteps && (
             <button onClick={intentarGuardar} disabled={saving} className="btn-primary flex-1 sm:flex-none disabled:opacity-50">
-              {saving ? <><Loader2 size={16} className="animate-spin" /> Guardando...</> : <><Check size={16} /> Guardar ingreso</>}
+              {saving ? <><Loader2 size={16} className="animate-spin" /> Guardando...</> : <><Check size={16} /> Guardar cambios</>}
             </button>
           )}
         </div>
@@ -1196,21 +1376,26 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving, showAlert }
   );
 }
 
-function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, filterPatente, filterEmpresa, filterEstado, setFilterPatente, setFilterEmpresa, setFilterEstado, onAbrirSelector, onVer, onEntregar, onEditar, onEliminar, onExportarPeriodo, onPDFRespaldos, onNuevo }) {
+function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, filterPatente, filterEmpresa, filterEstado, setFilterPatente, setFilterEmpresa, setFilterEstado, onAbrirSelector, onVer, onEntregar, onEditar, onRevertir, onEliminar, onExportarPeriodo, onPDFRespaldos, onNuevo }) {
+  const hayFiltros = filterPatente || filterEmpresa || filterEstado !== 'todos';
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
             <h2 className="text-xl sm:text-2xl font-bold text-slate-900">Historial de Ingresos</h2>
-            <p className="text-sm text-slate-500">{ingresos.length} de {totalDelPeriodo} registros</p>
+            <p className="text-sm text-slate-500">
+              {ingresos.length} de {totalDelPeriodo} registros
+              {hayFiltros && <span className="ml-2 text-blue-700 font-medium">· filtros activos</span>}
+            </p>
           </div>
           <div className="flex gap-2 flex-wrap">
-            <button onClick={onPDFRespaldos} className="btn-secondary" title="Generar PDF con todos los respaldos firmados del mes">
-              <FileText size={16} /> <span className="hidden sm:inline">PDF respaldos</span>
+            <button onClick={onPDFRespaldos} className="btn-secondary" title={hayFiltros ? 'Generar PDF con los respaldos filtrados' : 'Generar PDF con todos los respaldos del mes'}>
+              <FileText size={16} /> <span className="hidden sm:inline">PDF respaldos</span> ({ingresos.length})
             </button>
             <button onClick={onExportarPeriodo} className="btn-secondary">
-              <Download size={16} /> <span className="hidden sm:inline">Excel mes</span>
+              <Download size={16} /> <span className="hidden sm:inline">Excel mes</span> ({ingresos.length})
             </button>
             <button onClick={onNuevo} className="btn-primary"><Plus size={16} /> Nuevo</button>
           </div>
@@ -1264,6 +1449,14 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
             <option value="entregado">Entregados</option>
           </select>
         </div>
+        {hayFiltros && (
+          <button
+            onClick={() => { setFilterPatente(''); setFilterEmpresa(''); setFilterEstado('todos'); }}
+            className="mt-3 text-xs text-blue-700 hover:text-blue-900 flex items-center gap-1"
+          >
+            <X size={12} /> Limpiar filtros
+          </button>
+        )}
       </div>
 
       {ingresos.length === 0 ? (
@@ -1308,11 +1501,12 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-1">
                         <IconBtn onClick={() => onVer(i)} icon={<Eye size={14} />} title="Ver" />
+                        <IconBtn onClick={() => onEditar(i)} icon={<Edit2 size={14} />} title="Editar" />
                         {i.estado === 'en_proceso' && (
-                          <>
-                            <IconBtn onClick={() => onEditar(i)} icon={<Edit2 size={14} />} title="Editar" />
-                            <IconBtn onClick={() => onEntregar(i)} icon={<Check size={14} />} title="Registrar entrega" color="green" />
-                          </>
+                          <IconBtn onClick={() => onEntregar(i)} icon={<Check size={14} />} title="Registrar entrega" color="green" />
+                        )}
+                        {i.estado === 'entregado' && (
+                          <IconBtn onClick={() => onRevertir(i)} icon={<RotateCcw size={14} />} title="Revertir a en proceso" color="amber" />
                         )}
                         <IconBtn onClick={() => onEliminar(i.id)} icon={<Trash2 size={14} />} title="Eliminar" color="red" />
                       </div>
@@ -1334,13 +1528,13 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
                   </div>
                   <EstadoBadge estado={i.estado} />
                 </div>
-                <div className="flex gap-1 mt-3 pt-3 border-t border-slate-100">
+                <div className="flex gap-1 mt-3 pt-3 border-t border-slate-100 flex-wrap">
                   <button onClick={() => onVer(i)} className="flex-1 text-xs py-2 px-2 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium">Ver</button>
-                  {i.estado === 'en_proceso' && (
-                    <>
-                      <button onClick={() => onEditar(i)} className="flex-1 text-xs py-2 px-2 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium">Editar</button>
-                      <button onClick={() => onEntregar(i)} className="flex-1 text-xs py-2 px-2 rounded-md bg-green-600 hover:bg-green-700 text-white font-medium">Entregar</button>
-                    </>
+                  <button onClick={() => onEditar(i)} className="flex-1 text-xs py-2 px-2 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium">Editar</button>
+                  {i.estado === 'en_proceso' ? (
+                    <button onClick={() => onEntregar(i)} className="flex-1 text-xs py-2 px-2 rounded-md bg-green-600 hover:bg-green-700 text-white font-medium">Entregar</button>
+                  ) : (
+                    <button onClick={() => onRevertir(i)} className="flex-1 text-xs py-2 px-2 rounded-md bg-amber-100 hover:bg-amber-200 text-amber-800 font-medium">Revertir</button>
                   )}
                   <button onClick={() => onEliminar(i.id)} className="text-xs py-2 px-3 rounded-md bg-red-50 hover:bg-red-100 text-red-700 font-medium"><Trash2 size={14} /></button>
                 </div>
@@ -1353,7 +1547,7 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
   );
 }
 
-function DetalleView({ ingreso, onVolver, onPDF, onEntregar }) {
+function DetalleView({ ingreso, onVolver, onPDF, onEntregar, onEditar, onRevertir }) {
   return (
     <div className="space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -1364,11 +1558,17 @@ function DetalleView({ ingreso, onVolver, onPDF, onEntregar }) {
           </div>
           <p className="text-sm text-slate-500">Creado el {new Date(ingreso.fecha_creacion).toLocaleString('es-CL')}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button onClick={onVolver} className="btn-secondary"><ChevronLeft size={16} /> Volver</button>
           <button onClick={onPDF} className="btn-secondary"><FileText size={16} /> PDF</button>
+          <button onClick={onEditar} className="btn-secondary"><Edit2 size={16} /> Editar</button>
           {ingreso.estado === 'en_proceso' && (
             <button onClick={onEntregar} className="btn-primary"><Check size={16} /> Entregar</button>
+          )}
+          {ingreso.estado === 'entregado' && (
+            <button onClick={onRevertir} className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg text-sm font-medium transition-colors">
+              <RotateCcw size={16} /> Revertir entrega
+            </button>
           )}
         </div>
       </div>
@@ -1506,6 +1706,7 @@ function IconBtn({ onClick, icon, title, color = 'slate' }) {
   const colors = {
     slate: 'text-slate-600 hover:bg-slate-100',
     green: 'text-green-700 hover:bg-green-50',
+    amber: 'text-amber-700 hover:bg-amber-50',
     red: 'text-red-600 hover:bg-red-50'
   };
   return (
@@ -1531,7 +1732,6 @@ function DetalleRow({ label, value }) {
   );
 }
 
-// Generar HTML de un solo ingreso (formato completo)
 function generarBloqueReporteIndividual(i, pageBreakAntes = false) {
   const servicios = SERVICIOS_CATALOGO.map(s => `
     <tr><td>${s}</td><td style="text-align:center;width:30px">${(i.servicios || []).includes(s) ? '✓' : ''}</td></tr>
@@ -1652,11 +1852,14 @@ ${generarBloqueReporteIndividual(i, false)}
 </body></html>`;
 }
 
-function generarHTMLRespaldosMes(ingresos, periodoLabel) {
+function generarHTMLRespaldosMes(ingresos, periodoLabel, empresaFiltrada) {
   const bloques = ingresos.map((i, idx) => generarBloqueReporteIndividual(i, idx > 0)).join('\n');
+  const tituloPestana = empresaFiltrada
+    ? `Respaldos ${periodoLabel} - ${empresaFiltrada}`
+    : `Respaldos ${periodoLabel}`;
 
   return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Respaldos ${periodoLabel} - Luandi Servicios</title>
+<html><head><meta charset="utf-8"><title>${tituloPestana} - Luandi Servicios</title>
 <style>${getEstilosReporte()}</style></head><body>
 ${bloques}
 </body></html>`;
