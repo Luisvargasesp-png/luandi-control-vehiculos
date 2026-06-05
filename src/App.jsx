@@ -74,6 +74,15 @@ const EQUIPAMIENTO_CATALOGO = [
 
 const TIPOS_VEHICULO = ['Camioneta', 'Camión', 'Bus', 'Minibus', 'Automóvil', 'SUV', 'Furgón', 'Maquinaria'];
 
+// Personal Luandi que recibe/entrega vehículos
+const PERSONAL_LUANDI_CATALOGO = [
+  'Catherine Traslaviña',
+  'Francisco Santana',
+  'Kevin Riveros',
+  'Hugo Borjas',
+  'Luis Vargas'
+];
+
 const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
 function getPeriodoKey(fecha) {
@@ -329,7 +338,7 @@ function ConfirmModal({ title, message, confirmText, cancelText, confirmColor, o
   );
 }
 
-function SelectConOtro({ label, valor, opciones, onChange, placeholder }) {
+function SelectConOtro({ label, valor, opciones, onChange, placeholder, uppercase = true }) {
   const esOtro = valor && !opciones.includes(valor);
   const [usandoOtro, setUsandoOtro] = useState(esOtro);
 
@@ -359,7 +368,7 @@ function SelectConOtro({ label, valor, opciones, onChange, placeholder }) {
         </select>
       ) : (
         <div className="flex gap-2">
-          <input type="text" value={valor} onChange={e => onChange(e.target.value.toUpperCase())} className="input flex-1" placeholder={placeholder || 'Escriba el nombre'} autoFocus />
+          <input type="text" value={valor} onChange={e => onChange(uppercase ? e.target.value.toUpperCase() : e.target.value)} className="input flex-1" placeholder={placeholder || 'Escriba el nombre'} autoFocus />
           <button type="button" onClick={() => { setUsandoOtro(false); onChange(''); }} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm flex items-center gap-1" title="Volver a la lista">
             <ChevronLeft size={14} /> Lista
           </button>
@@ -1180,9 +1189,9 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
               <Field label="Hora">
                 <input type="time" value={data.luandi_recibe_hora} onChange={e => update('luandi_recibe_hora', e.target.value)} className="input" />
               </Field>
-              <Field label="Recibido por (Luandi) *" className="sm:col-span-2">
-                <input type="text" value={data.luandi_recibe_persona} onChange={e => update('luandi_recibe_persona', e.target.value)} className="input" placeholder="Nombre del personal Luandi que recibe" />
-              </Field>
+              <div className="sm:col-span-2">
+                <SelectConOtro label="Recibido por (Luandi) *" valor={data.luandi_recibe_persona} opciones={PERSONAL_LUANDI_CATALOGO} onChange={(v) => update('luandi_recibe_persona', v)} placeholder="Nombre del personal Luandi" uppercase={false} />
+              </div>
             </div>
           </div>
         </div>
@@ -1195,7 +1204,7 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
               <Field label="Fecha"><input type="date" value={data.luandi_entrega_fecha} onChange={e => update('luandi_entrega_fecha', e.target.value)} className="input" /></Field>
               <Field label="Hora"><input type="time" value={data.luandi_entrega_hora} onChange={e => update('luandi_entrega_hora', e.target.value)} className="input" /></Field>
-              <Field label="Entregado por (Luandi)" className="sm:col-span-2"><input type="text" value={data.luandi_entrega_persona} onChange={e => update('luandi_entrega_persona', e.target.value)} className="input" placeholder="Nombre del personal Luandi" /></Field>
+              <div className="sm:col-span-2"><SelectConOtro label="Entregado por (Luandi)" valor={data.luandi_entrega_persona} opciones={PERSONAL_LUANDI_CATALOGO} onChange={(v) => update('luandi_entrega_persona', v)} placeholder="Nombre del personal Luandi" uppercase={false} /></div>
             </div>
           </div>
 
@@ -1293,7 +1302,7 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving, showAlert }
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
           <Field label="Fecha"><input type="date" value={data.luandi_entrega_fecha} onChange={e => update('luandi_entrega_fecha', e.target.value)} className="input" /></Field>
           <Field label="Hora"><input type="time" value={data.luandi_entrega_hora} onChange={e => update('luandi_entrega_hora', e.target.value)} className="input" /></Field>
-          <Field label="Entregado por (Luandi) *" className="sm:col-span-2"><input type="text" value={data.luandi_entrega_persona} onChange={e => update('luandi_entrega_persona', e.target.value)} className="input" placeholder="Nombre del personal Luandi" /></Field>
+          <div className="sm:col-span-2"><SelectConOtro label="Entregado por (Luandi) *" valor={data.luandi_entrega_persona} opciones={PERSONAL_LUANDI_CATALOGO} onChange={(v) => update('luandi_entrega_persona', v)} placeholder="Nombre del personal Luandi" uppercase={false} /></div>
         </div>
       </div>
 
