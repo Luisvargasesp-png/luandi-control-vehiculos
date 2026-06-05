@@ -20,7 +20,6 @@ const EMPRESAS_CATALOGO = [
   'VILLA TRAVEL'
 ];
 
-// Marcas con sus modelos asociados
 const MARCAS_CATALOGO = {
   'CHANGAN': [],
   'CHEVROLET': ['COLORADO'],
@@ -40,33 +39,34 @@ const MARCAS_CATALOGO = {
 
 const MARCAS_LISTA = Object.keys(MARCAS_CATALOGO);
 
+// SERVICIOS — algunos requieren cantidad
 const SERVICIOS_CATALOGO = [
-  'Lavado Full (exterior, interior y chasis)',
-  'Lavado Full Diurno (Comtecsa)',
-  'Lavado Full Nocturno (Comtecsa)',
-  'Lavado Exterior Completo (exterior y chasis)',
-  'Limpieza Interior',
-  'Lavado Exterior (sin chasis)',
-  'Lavado de Tapiz',
-  'Instalación de Fundas Asientos',
-  'Recarga de Adblue',
-  'Torqueo de Neumáticos',
-  'Mantención Aire Acondicionado',
-  'Cambio Filtro Aire',
-  'Cambio Filtro Polen'
+  { nombre: 'Lavado Full (exterior, interior y chasis)', requiereCantidad: false },
+  { nombre: 'Lavado Full Diurno (Comtecsa)', requiereCantidad: false },
+  { nombre: 'Lavado Full Nocturno (Comtecsa)', requiereCantidad: false },
+  { nombre: 'Lavado Exterior Completo (exterior y chasis)', requiereCantidad: false },
+  { nombre: 'Limpieza Interior', requiereCantidad: false },
+  { nombre: 'Lavado Exterior (sin chasis)', requiereCantidad: false },
+  { nombre: 'Lavado de Tapiz', requiereCantidad: false },
+  { nombre: 'Instalación de Fundas Asientos', requiereCantidad: false },
+  { nombre: 'Recarga de Adblue', requiereCantidad: true, unidad: 'litros', campo: 'cantidad_adblue_litros', tipo: 'entero' },
+  { nombre: 'Torqueo de Neumáticos', requiereCantidad: false },
+  { nombre: 'Mantención Aire Acondicionado', requiereCantidad: false },
+  { nombre: 'Cambio Filtro Aire', requiereCantidad: false },
+  { nombre: 'Cambio Filtro Polen', requiereCantidad: false }
 ];
 
-// Equipamiento — algunos requieren cantidad
+// EQUIPAMIENTO — la mayoría requiere cantidad
 const EQUIPAMIENTO_CATALOGO = [
   { nombre: 'Pertiga Normal', requiereCantidad: false },
   { nombre: 'Pertiga Full Led', requiereCantidad: false },
-  { nombre: 'Cuñas', requiereCantidad: false },
-  { nombre: 'Piola para cuñas', requiereCantidad: false },
-  { nombre: 'Porta cuñas', requiereCantidad: false },
-  { nombre: 'Checkpoint tipo gota', requiereCantidad: false },
+  { nombre: 'Cuñas', requiereCantidad: true, unidad: 'unidades', campo: 'cantidad_cunas', tipo: 'entero' },
+  { nombre: 'Piola para cuñas', requiereCantidad: true, unidad: 'unidades', campo: 'cantidad_piola_cunas', tipo: 'entero' },
+  { nombre: 'Porta cuñas', requiereCantidad: true, unidad: 'unidades', campo: 'cantidad_porta_cunas', tipo: 'entero' },
+  { nombre: 'Checkpoint tipo gota', requiereCantidad: true, unidad: 'unidades', campo: 'cantidad_checkpoint', tipo: 'entero' },
   { nombre: 'Baliza', requiereCantidad: false },
-  { nombre: 'Focos Mineros', requiereCantidad: false },
-  { nombre: 'Mallas elásticas', requiereCantidad: false },
+  { nombre: 'Focos Mineros', requiereCantidad: true, unidad: 'unidades', campo: 'cantidad_focos_mineros', tipo: 'entero' },
+  { nombre: 'Mallas elásticas', requiereCantidad: true, unidad: 'unidades', campo: 'cantidad_mallas_elasticas', tipo: 'entero' },
   { nombre: 'Cambio de Cinta Reflectante', requiereCantidad: true, unidad: 'metros', campo: 'cantidad_cinta_metros', tipo: 'decimal' },
   { nombre: 'Cambio de Foco Trasero', requiereCantidad: true, unidad: 'unidades', campo: 'cantidad_focos_traseros', tipo: 'entero' },
   { nombre: 'Cambio de Faroles Delanteros', requiereCantidad: true, unidad: 'unidades', campo: 'cantidad_faroles_delanteros', tipo: 'entero' }
@@ -86,19 +86,6 @@ function getPeriodoLabel(periodoKey) {
   return `${MESES[parseInt(month) - 1]} ${year}`;
 }
 
-// Determinar si una empresa/marca/modelo es "otro" (no está en el catálogo)
-function esEmpresaOtra(empresa) {
-  return empresa && !EMPRESAS_CATALOGO.includes(empresa);
-}
-function esMarcaOtra(marca) {
-  return marca && !MARCAS_LISTA.includes(marca);
-}
-function esModeloOtro(marca, modelo) {
-  if (!modelo) return false;
-  if (!MARCAS_LISTA.includes(marca)) return true; // marca es "otro", entonces modelo también es libre
-  return !MARCAS_CATALOGO[marca].includes(modelo);
-}
-
 function dbToApp(row) {
   return {
     id: row.id,
@@ -113,6 +100,14 @@ function dbToApp(row) {
     servicios_otros: row.servicios_otros || '',
     equipamiento: row.equipamiento || [],
     equipamiento_otros: row.equipamiento_otros || '',
+    // Cantidades
+    cantidad_adblue_litros: row.cantidad_adblue_litros || '',
+    cantidad_cunas: row.cantidad_cunas || '',
+    cantidad_piola_cunas: row.cantidad_piola_cunas || '',
+    cantidad_porta_cunas: row.cantidad_porta_cunas || '',
+    cantidad_checkpoint: row.cantidad_checkpoint || '',
+    cantidad_focos_mineros: row.cantidad_focos_mineros || '',
+    cantidad_mallas_elasticas: row.cantidad_mallas_elasticas || '',
     cantidad_cinta_metros: row.cantidad_cinta_metros || '',
     cantidad_focos_traseros: row.cantidad_focos_traseros || '',
     cantidad_faroles_delanteros: row.cantidad_faroles_delanteros || '',
@@ -146,8 +141,19 @@ function appToDb(data) {
   [...dateFields, ...timeFields].forEach(f => {
     if (clean[f] === '') clean[f] = null;
   });
-  // Campos numéricos: convertir vacíos a null
-  const numFields = ['cantidad_cinta_metros', 'cantidad_focos_traseros', 'cantidad_faroles_delanteros'];
+  // Todos los campos de cantidad
+  const numFields = [
+    'cantidad_adblue_litros',
+    'cantidad_cunas',
+    'cantidad_piola_cunas',
+    'cantidad_porta_cunas',
+    'cantidad_checkpoint',
+    'cantidad_focos_mineros',
+    'cantidad_mallas_elasticas',
+    'cantidad_cinta_metros',
+    'cantidad_focos_traseros',
+    'cantidad_faroles_delanteros'
+  ];
   numFields.forEach(f => {
     if (clean[f] === '' || clean[f] === undefined) clean[f] = null;
     else if (typeof clean[f] === 'string') clean[f] = Number(clean[f]);
@@ -323,8 +329,7 @@ function ConfirmModal({ title, message, confirmText, cancelText, confirmColor, o
   );
 }
 
-// Componente: Select con opción "Otro" que permite escribir
-function SelectConOtro({ label, valor, opciones, onChange, placeholder, requerido }) {
+function SelectConOtro({ label, valor, opciones, onChange, placeholder }) {
   const esOtro = valor && !opciones.includes(valor);
   const [usandoOtro, setUsandoOtro] = useState(esOtro);
 
@@ -347,38 +352,48 @@ function SelectConOtro({ label, valor, opciones, onChange, placeholder, requerid
     <div>
       <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
       {!usandoOtro ? (
-        <select 
-          value={opciones.includes(valor) ? valor : ''} 
-          onChange={handleSelectChange} 
-          className="input"
-        >
+        <select value={opciones.includes(valor) ? valor : ''} onChange={handleSelectChange} className="input">
           <option value="">Seleccione...</option>
           {opciones.map(o => <option key={o} value={o}>{o}</option>)}
           <option value="__OTRO__">━━ Otro (escribir manualmente) ━━</option>
         </select>
       ) : (
         <div className="flex gap-2">
-          <input
-            type="text"
-            value={valor}
-            onChange={e => onChange(e.target.value.toUpperCase())}
-            className="input flex-1"
-            placeholder={placeholder || 'Escriba el nombre'}
-            autoFocus
-          />
-          <button
-            type="button"
-            onClick={() => { setUsandoOtro(false); onChange(''); }}
-            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm flex items-center gap-1"
-            title="Volver a la lista"
-          >
+          <input type="text" value={valor} onChange={e => onChange(e.target.value.toUpperCase())} className="input flex-1" placeholder={placeholder || 'Escriba el nombre'} autoFocus />
+          <button type="button" onClick={() => { setUsandoOtro(false); onChange(''); }} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-sm flex items-center gap-1" title="Volver a la lista">
             <ChevronLeft size={14} /> Lista
           </button>
         </div>
       )}
-      {usandoOtro && (
-        <p className="text-xs text-blue-600 mt-1">📝 Escribiendo manualmente (no está en la lista)</p>
-      )}
+      {usandoOtro && <p className="text-xs text-blue-600 mt-1">📝 Escribiendo manualmente (no está en la lista)</p>}
+    </div>
+  );
+}
+
+// Item de servicio/equipamiento con cantidad opcional inline
+function CheckItemConCantidad({ item, marcado, cantidad, onToggle, onChangeCantidad }) {
+  return (
+    <div className={`rounded-lg border transition-colors ${marcado ? 'bg-blue-50 border-blue-200' : 'border-slate-200 hover:bg-slate-50'}`}>
+      <div className="flex items-center gap-2 px-3 py-2 flex-wrap">
+        <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
+          <input type="checkbox" checked={marcado} onChange={onToggle} className="w-4 h-4 rounded text-blue-600 flex-shrink-0" />
+          <span className="text-sm text-slate-700">{item.nombre}</span>
+        </label>
+        {marcado && item.requiereCantidad && (
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <input
+              type="number"
+              step={item.tipo === 'decimal' ? '0.1' : '1'}
+              min="0"
+              value={cantidad || ''}
+              onChange={e => onChangeCantidad(e.target.value)}
+              className="w-20 px-2 py-1 border border-blue-300 rounded text-sm bg-white focus:border-blue-600 focus:ring-1 focus:ring-blue-200 outline-none"
+              placeholder="0"
+            />
+            <span className="text-xs text-blue-700 font-medium">{item.unidad}</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -401,11 +416,7 @@ export default function LuandiApp() {
 
   const cargarIngresos = async () => {
     try {
-      const { data, error } = await supabase
-        .from('ingresos')
-        .select('*')
-        .order('fecha_creacion', { ascending: false });
-      
+      const { data, error } = await supabase.from('ingresos').select('*').order('fecha_creacion', { ascending: false });
       if (error) throw error;
       setIngresos((data || []).map(dbToApp));
       setConectado(true);
@@ -422,10 +433,7 @@ export default function LuandiApp() {
     cargarIngresos();
     const subscription = supabase
       .channel('ingresos_changes')
-      .on('postgres_changes',
-        { event: '*', schema: 'public', table: 'ingresos' },
-        () => { cargarIngresos(); }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ingresos' }, () => { cargarIngresos(); })
       .subscribe();
     return () => { subscription.unsubscribe(); };
   }, []);
@@ -435,13 +443,8 @@ export default function LuandiApp() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const showAlert = (title, message) => {
-    setAlertModal({ title, message });
-  };
-
-  const showConfirm = (config) => {
-    setConfirmModal(config);
-  };
+  const showAlert = (title, message) => setAlertModal({ title, message });
+  const showConfirm = (config) => setConfirmModal(config);
 
   const obtenerSiguienteNumero = async () => {
     const { data, error } = await supabase.rpc('siguiente_n_control');
@@ -454,19 +457,12 @@ export default function LuandiApp() {
     try {
       if (data.id) {
         const { id, ...resto } = data;
-        const { error } = await supabase
-          .from('ingresos')
-          .update(appToDb(resto))
-          .eq('id', id);
+        const { error } = await supabase.from('ingresos').update(appToDb(resto)).eq('id', id);
         if (error) throw error;
         showToast('Registro actualizado correctamente');
       } else {
         const n_control = await obtenerSiguienteNumero();
-        const nuevo = appToDb({
-          ...data,
-          n_control,
-          estado: 'en_proceso'
-        });
+        const nuevo = appToDb({ ...data, n_control, estado: 'en_proceso' });
         const { error } = await supabase.from('ingresos').insert(nuevo);
         if (error) throw error;
         showToast(`Ingreso N°${n_control} registrado correctamente`);
@@ -485,10 +481,7 @@ export default function LuandiApp() {
     setSaving(true);
     try {
       const { id, ...resto } = data;
-      const { error } = await supabase
-        .from('ingresos')
-        .update(appToDb({ ...resto, estado: 'entregado' }))
-        .eq('id', id);
+      const { error } = await supabase.from('ingresos').update(appToDb({ ...resto, estado: 'entregado' })).eq('id', id);
       if (error) throw error;
       showToast(`Entrega N°${data.n_control} registrada correctamente`);
       await cargarIngresos();
@@ -516,7 +509,6 @@ export default function LuandiApp() {
           showToast('Registro eliminado', 'info');
           await cargarIngresos();
         } catch (e) {
-          console.error('Error eliminando:', e);
           showToast('Error al eliminar: ' + e.message, 'error');
         }
       },
@@ -534,15 +526,11 @@ export default function LuandiApp() {
       onConfirm: async () => {
         setConfirmModal(null);
         try {
-          const { error } = await supabase
-            .from('ingresos')
-            .update({ estado: 'en_proceso' })
-            .eq('id', ingreso.id);
+          const { error } = await supabase.from('ingresos').update({ estado: 'en_proceso' }).eq('id', ingreso.id);
           if (error) throw error;
           showToast(`Ingreso N°${ingreso.n_control} revertido a "En proceso"`, 'info');
           await cargarIngresos();
         } catch (e) {
-          console.error('Error revirtiendo:', e);
           showToast('Error al revertir: ' + e.message, 'error');
         }
       },
@@ -578,7 +566,6 @@ export default function LuandiApp() {
     return partes.join('_');
   };
 
-  // Función para construir filas del CSV con nuevas columnas
   const construirFilaCSV = (i) => [
     i.n_control,
     new Date(i.fecha_creacion).toLocaleDateString('es-CL'),
@@ -591,6 +578,13 @@ export default function LuandiApp() {
     i.kilometraje || '',
     [...(i.servicios || []), i.servicios_otros].filter(Boolean).join('; '),
     [...(i.equipamiento || []), i.equipamiento_otros].filter(Boolean).join('; '),
+    i.cantidad_adblue_litros || '',
+    i.cantidad_cunas || '',
+    i.cantidad_piola_cunas || '',
+    i.cantidad_porta_cunas || '',
+    i.cantidad_checkpoint || '',
+    i.cantidad_focos_mineros || '',
+    i.cantidad_mallas_elasticas || '',
     i.cantidad_cinta_metros || '',
     i.cantidad_focos_traseros || '',
     i.cantidad_faroles_delanteros || '',
@@ -608,56 +602,44 @@ export default function LuandiApp() {
   const HEADERS_CSV = [
     'N°Control', 'Fecha Creación', 'Estado', 'Empresa', 'Patente', 'Tipo Vehículo', 'Marca', 'Modelo', 'Kilometraje',
     'Servicios', 'Equipamiento',
+    'Adblue (L)', 'Cuñas (un)', 'Piola Cuñas (un)', 'Porta Cuñas (un)', 'Checkpoint (un)', 'Focos Mineros (un)', 'Mallas Elásticas (un)',
     'Cinta Reflectante (m)', 'Focos Traseros (un)', 'Faroles Delanteros (un)',
     'Fecha Ingreso Cliente', 'Hora Ingreso Cliente', 'Entregado por (cliente)', 'Recibido por (Luandi)',
     'Fecha Entrega Cliente', 'Hora Entrega Cliente', 'Entregado por (Luandi)', 'Recibido por (cliente)',
     'Observaciones'
   ];
 
-  const exportarExcelFiltrado = () => {
-    if (ingresosFiltrados.length === 0) {
-      showToast('No hay registros con los filtros aplicados', 'info');
-      return;
-    }
-    const rows = ingresosFiltrados.map(construirFilaCSV);
-    const csv = [HEADERS_CSV, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    const periodoLabel = getPeriodoLabel(periodoSeleccionado).replace(' ', '_');
-    const filtros = filtrosActivos();
-    a.download = `Luandi_Ingresos_${periodoLabel}${filtros ? '_' + filtros : ''}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast(`${ingresosFiltrados.length} registros exportados`);
-  };
-
-  const exportarExcelTodo = () => {
-    if (ingresos.length === 0) {
+  const exportarCSV = (ingresosList, filename) => {
+    if (ingresosList.length === 0) {
       showToast('No hay registros para exportar', 'info');
       return;
     }
-    const rows = ingresos.map(construirFilaCSV);
+    const rows = ingresosList.map(construirFilaCSV);
     const csv = [HEADERS_CSV, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Luandi_Ingresos_Completo_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
-    showToast(`${ingresos.length} registros exportados`);
+    showToast(`${ingresosList.length} registros exportados`);
+  };
+
+  const exportarExcelFiltrado = () => {
+    const periodoLabel = getPeriodoLabel(periodoSeleccionado).replace(' ', '_');
+    const filtros = filtrosActivos();
+    exportarCSV(ingresosFiltrados, `Luandi_Ingresos_${periodoLabel}${filtros ? '_' + filtros : ''}.csv`);
+  };
+
+  const exportarExcelTodo = () => {
+    exportarCSV(ingresos, `Luandi_Ingresos_Completo_${new Date().toISOString().split('T')[0]}.csv`);
   };
 
   const generarPDF = (ingreso) => {
     const win = window.open('', '_blank');
-    if (!win) {
-      showToast('Permita ventanas emergentes para descargar el PDF', 'error');
-      return;
-    }
-    const html = generarHTMLReporte(ingreso);
-    win.document.write(html);
+    if (!win) { showToast('Permita ventanas emergentes para descargar el PDF', 'error'); return; }
+    win.document.write(generarHTMLReporte(ingreso));
     win.document.close();
     setTimeout(() => win.print(), 500);
   };
@@ -668,13 +650,9 @@ export default function LuandiApp() {
       return;
     }
     const win = window.open('', '_blank');
-    if (!win) {
-      showToast('Permita ventanas emergentes para descargar el PDF', 'error');
-      return;
-    }
+    if (!win) { showToast('Permita ventanas emergentes para descargar el PDF', 'error'); return; }
     const ordenados = [...ingresosFiltrados].sort((a, b) => a.n_control - b.n_control);
-    const html = generarHTMLRespaldosMes(ordenados, getPeriodoLabel(periodoSeleccionado), filterEmpresa);
-    win.document.write(html);
+    win.document.write(generarHTMLRespaldosMes(ordenados, getPeriodoLabel(periodoSeleccionado), filterEmpresa));
     win.document.close();
     setTimeout(() => win.print(), 800);
   };
@@ -735,40 +713,18 @@ export default function LuandiApp() {
         </div>
       )}
 
-      {alertModal && (
-        <AlertModal title={alertModal.title} message={alertModal.message} onClose={() => setAlertModal(null)} />
-      )}
-
+      {alertModal && <AlertModal title={alertModal.title} message={alertModal.message} onClose={() => setAlertModal(null)} />}
       {confirmModal && <ConfirmModal {...confirmModal} />}
-
       {mostrarSelectorPeriodo && (
-        <SelectorPeriodo
-          periodos={periodosDisponibles}
-          periodoActual={periodoSeleccionado}
-          onSelect={(p) => { setPeriodoSeleccionado(p); setMostrarSelectorPeriodo(false); }}
-          onClose={() => setMostrarSelectorPeriodo(false)}
-        />
+        <SelectorPeriodo periodos={periodosDisponibles} periodoActual={periodoSeleccionado} onSelect={(p) => { setPeriodoSeleccionado(p); setMostrarSelectorPeriodo(false); }} onClose={() => setMostrarSelectorPeriodo(false)} />
       )}
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         {view === 'home' && (
-          <HomeView
-            ingresos={ingresos}
-            ingresosDelPeriodo={ingresosDelPeriodo}
-            periodoLabel={getPeriodoLabel(periodoSeleccionado)}
-            onNuevo={() => { setSelectedIngreso(null); setView('nuevo'); }}
-            onHistorial={() => setView('historial')}
-            onExportar={exportarExcelTodo}
-          />
+          <HomeView ingresos={ingresos} ingresosDelPeriodo={ingresosDelPeriodo} periodoLabel={getPeriodoLabel(periodoSeleccionado)} onNuevo={() => { setSelectedIngreso(null); setView('nuevo'); }} onHistorial={() => setView('historial')} onExportar={exportarExcelTodo} />
         )}
         {view === 'nuevo' && (
-          <FormularioIngreso
-            ingreso={selectedIngreso}
-            onGuardar={guardarIngreso}
-            onCancelar={() => setView(selectedIngreso ? 'historial' : 'home')}
-            saving={saving}
-            showAlert={showAlert}
-          />
+          <FormularioIngreso ingreso={selectedIngreso} onGuardar={guardarIngreso} onCancelar={() => setView(selectedIngreso ? 'historial' : 'home')} saving={saving} showAlert={showAlert} />
         )}
         {view === 'historial' && (
           <HistorialView
@@ -794,23 +750,10 @@ export default function LuandiApp() {
           />
         )}
         {view === 'detalle' && selectedIngreso && (
-          <DetalleView
-            ingreso={selectedIngreso}
-            onVolver={() => setView('historial')}
-            onPDF={() => generarPDF(selectedIngreso)}
-            onEntregar={() => setView('entrega')}
-            onEditar={() => setView('nuevo')}
-            onRevertir={() => revertirEstado(selectedIngreso)}
-          />
+          <DetalleView ingreso={selectedIngreso} onVolver={() => setView('historial')} onPDF={() => generarPDF(selectedIngreso)} onEntregar={() => setView('entrega')} onEditar={() => setView('nuevo')} onRevertir={() => revertirEstado(selectedIngreso)} />
         )}
         {view === 'entrega' && selectedIngreso && (
-          <FormularioEntrega
-            ingreso={selectedIngreso}
-            onGuardar={cerrarEntrega}
-            onCancelar={() => setView('historial')}
-            saving={saving}
-            showAlert={showAlert}
-          />
+          <FormularioEntrega ingreso={selectedIngreso} onGuardar={cerrarEntrega} onCancelar={() => setView('historial')} saving={saving} showAlert={showAlert} />
         )}
       </main>
 
@@ -839,9 +782,7 @@ function SelectorPeriodo({ periodos, periodoActual, onSelect, onClose }) {
       <div className="bg-white rounded-2xl shadow-xl max-w-md w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
           <h3 className="font-bold text-slate-900">Seleccionar período</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <X size={20} />
-          </button>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600"><X size={20} /></button>
         </div>
         <div className="overflow-y-auto p-3">
           {periodos.length === 0 ? (
@@ -852,13 +793,7 @@ function SelectorPeriodo({ periodos, periodoActual, onSelect, onClose }) {
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wider px-3 py-2">Año {anio}</p>
                 <div className="space-y-1">
                   {porAnio[anio].map(p => (
-                    <button
-                      key={p.key}
-                      onClick={() => onSelect(p.key)}
-                      className={`w-full text-left px-3 py-2.5 rounded-lg flex items-center justify-between transition-colors ${
-                        p.key === periodoActual ? 'bg-blue-50 text-blue-900 border border-blue-200' : 'hover:bg-slate-50 border border-transparent'
-                      }`}
-                    >
+                    <button key={p.key} onClick={() => onSelect(p.key)} className={`w-full text-left px-3 py-2.5 rounded-lg flex items-center justify-between transition-colors ${p.key === periodoActual ? 'bg-blue-50 text-blue-900 border border-blue-200' : 'hover:bg-slate-50 border border-transparent'}`}>
                       <span className="font-medium text-sm">{p.label}</span>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${p.key === periodoActual ? 'bg-blue-200 text-blue-800' : 'bg-slate-100 text-slate-600'}`}>
                         {p.count} {p.count === 1 ? 'ingreso' : 'ingresos'}
@@ -878,10 +813,7 @@ function SelectorPeriodo({ periodos, periodoActual, onSelect, onClose }) {
 function HomeView({ ingresos, ingresosDelPeriodo, periodoLabel, onNuevo, onHistorial, onExportar }) {
   const enProceso = ingresos.filter(i => i.estado === 'en_proceso').length;
   const entregados = ingresos.filter(i => i.estado === 'entregado').length;
-  const hoy = ingresos.filter(i => {
-    const fecha = new Date(i.fecha_creacion).toDateString();
-    return fecha === new Date().toDateString();
-  }).length;
+  const hoy = ingresos.filter(i => new Date(i.fecha_creacion).toDateString() === new Date().toDateString()).length;
 
   return (
     <div className="space-y-6">
@@ -911,9 +843,7 @@ function HomeView({ ingresos, ingresosDelPeriodo, periodoLabel, onNuevo, onHisto
             {ingresos.slice(0, 5).map(i => (
               <div key={i.id} className="px-5 py-3 flex items-center justify-between hover:bg-slate-50">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-9 h-9 bg-blue-50 text-blue-700 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0">
-                    #{i.n_control}
-                  </div>
+                  <div className="w-9 h-9 bg-blue-50 text-blue-700 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0">#{i.n_control}</div>
                   <div className="min-w-0">
                     <p className="font-medium text-slate-900 text-sm truncate">{i.nombre_empresa || 'Sin empresa'}</p>
                     <p className="text-xs text-slate-500 truncate">{i.patente} · {i.marca} {i.modelo}</p>
@@ -930,16 +860,10 @@ function HomeView({ ingresos, ingresosDelPeriodo, periodoLabel, onNuevo, onHisto
 }
 
 function StatCard({ label, value, color, icon }) {
-  const colors = {
-    amber: 'bg-amber-50 text-amber-700',
-    green: 'bg-green-50 text-green-700',
-    blue: 'bg-blue-50 text-blue-700'
-  };
+  const colors = { amber: 'bg-amber-50 text-amber-700', green: 'bg-green-50 text-green-700', blue: 'bg-blue-50 text-blue-700' };
   return (
     <div className="bg-white rounded-xl border border-slate-200 p-3 sm:p-4">
-      <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg ${colors[color]} flex items-center justify-center mb-2`}>
-        {icon}
-      </div>
+      <div className={`w-8 h-8 sm:w-10 sm:h-10 rounded-lg ${colors[color]} flex items-center justify-center mb-2`}>{icon}</div>
       <p className="text-xl sm:text-3xl font-bold text-slate-900">{value}</p>
       <p className="text-xs sm:text-sm text-slate-500">{label}</p>
     </div>
@@ -948,15 +872,8 @@ function StatCard({ label, value, color, icon }) {
 
 function ActionCard({ onClick, icon, title, description, primary }) {
   return (
-    <button
-      onClick={onClick}
-      className={`text-left p-5 rounded-xl border transition-all hover:shadow-md hover:-translate-y-0.5 ${
-        primary ? 'bg-gradient-to-br from-blue-600 to-blue-800 text-white border-blue-700' : 'bg-white border-slate-200 hover:border-slate-300'
-      }`}
-    >
-      <div className={`w-11 h-11 rounded-lg flex items-center justify-center mb-3 ${primary ? 'bg-white/20' : 'bg-blue-50 text-blue-700'}`}>
-        {icon}
-      </div>
+    <button onClick={onClick} className={`text-left p-5 rounded-xl border transition-all hover:shadow-md hover:-translate-y-0.5 ${primary ? 'bg-gradient-to-br from-blue-600 to-blue-800 text-white border-blue-700' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
+      <div className={`w-11 h-11 rounded-lg flex items-center justify-center mb-3 ${primary ? 'bg-white/20' : 'bg-blue-50 text-blue-700'}`}>{icon}</div>
       <h3 className={`font-bold mb-1 ${primary ? 'text-white' : 'text-slate-900'}`}>{title}</h3>
       <p className={`text-xs sm:text-sm ${primary ? 'text-blue-100' : 'text-slate-500'}`}>{description}</p>
     </button>
@@ -974,68 +891,52 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
   const [step, setStep] = useState(1);
   const esEntregado = ingreso && ingreso.estado === 'entregado';
   const [data, setData] = useState(ingreso || {
-    nombre_empresa: '',
-    patente: '',
-    tipo_vehiculo: '',
-    marca: '',
-    modelo: '',
-    kilometraje: '',
-    servicios: [],
-    servicios_otros: '',
-    equipamiento: [],
-    equipamiento_otros: '',
-    cantidad_cinta_metros: '',
-    cantidad_focos_traseros: '',
-    cantidad_faroles_delanteros: '',
+    nombre_empresa: '', patente: '', tipo_vehiculo: '', marca: '', modelo: '', kilometraje: '',
+    servicios: [], servicios_otros: '',
+    equipamiento: [], equipamiento_otros: '',
+    cantidad_adblue_litros: '',
+    cantidad_cunas: '', cantidad_piola_cunas: '', cantidad_porta_cunas: '', cantidad_checkpoint: '',
+    cantidad_focos_mineros: '', cantidad_mallas_elasticas: '',
+    cantidad_cinta_metros: '', cantidad_focos_traseros: '', cantidad_faroles_delanteros: '',
     cliente_entrega_fecha: new Date().toISOString().split('T')[0],
     cliente_entrega_hora: new Date().toTimeString().slice(0, 5),
-    cliente_entrega_persona: '',
-    cliente_entrega_firma: '',
-    cliente_entrega_sin_firma: false,
-    cliente_entrega_motivo_sin_firma: '',
+    cliente_entrega_persona: '', cliente_entrega_firma: '',
+    cliente_entrega_sin_firma: false, cliente_entrega_motivo_sin_firma: '',
     luandi_recibe_fecha: new Date().toISOString().split('T')[0],
     luandi_recibe_hora: new Date().toTimeString().slice(0, 5),
-    luandi_recibe_persona: '',
-    observaciones: ''
+    luandi_recibe_persona: '', observaciones: ''
   });
 
   const update = (field, value) => setData(prev => ({ ...prev, [field]: value }));
 
-  // Cambiar marca: si la nueva marca no tiene el modelo actual, limpiarlo
   const updateMarca = (nuevaMarca) => {
     setData(prev => {
       const modeloValido = nuevaMarca && MARCAS_CATALOGO[nuevaMarca]?.includes(prev.modelo);
-      return {
-        ...prev,
-        marca: nuevaMarca,
-        modelo: modeloValido ? prev.modelo : ''
-      };
+      return { ...prev, marca: nuevaMarca, modelo: modeloValido ? prev.modelo : '' };
     });
   };
 
   const toggleServicio = (s) => {
+    const item = SERVICIOS_CATALOGO.find(x => x.nombre === s);
     const arr = data.servicios || [];
-    update('servicios', arr.includes(s) ? arr.filter(x => x !== s) : [...arr, s]);
-  };
-
-  const toggleEquipamiento = (s) => {
-    const arr = data.equipamiento || [];
     const yaEstaba = arr.includes(s);
-    update('equipamiento', yaEstaba ? arr.filter(x => x !== s) : [...arr, s]);
-    
-    // Si lo desmarca, limpiar la cantidad asociada
-    if (yaEstaba) {
-      const equipo = EQUIPAMIENTO_CATALOGO.find(e => e.nombre === s);
-      if (equipo && equipo.campo) {
-        update(equipo.campo, '');
-      }
+    update('servicios', yaEstaba ? arr.filter(x => x !== s) : [...arr, s]);
+    if (yaEstaba && item && item.campo) {
+      update(item.campo, '');
     }
   };
 
-  // Modelos disponibles según marca seleccionada
-  const modelosDisponibles = data.marca && MARCAS_CATALOGO[data.marca] 
-    ? MARCAS_CATALOGO[data.marca] 
-    : [];
+  const toggleEquipamiento = (s) => {
+    const item = EQUIPAMIENTO_CATALOGO.find(x => x.nombre === s);
+    const arr = data.equipamiento || [];
+    const yaEstaba = arr.includes(s);
+    update('equipamiento', yaEstaba ? arr.filter(x => x !== s) : [...arr, s]);
+    if (yaEstaba && item && item.campo) {
+      update(item.campo, '');
+    }
+  };
+
+  const modelosDisponibles = data.marca && MARCAS_CATALOGO[data.marca] ? MARCAS_CATALOGO[data.marca] : [];
 
   const puedeAvanzar = () => {
     if (step === 1) return data.nombre_empresa && data.patente && data.tipo_vehiculo && data.marca;
@@ -1045,6 +946,21 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
   };
 
   const intentarGuardar = () => {
+    // Validar cantidades de servicios
+    for (const serv of SERVICIOS_CATALOGO) {
+      if (serv.requiereCantidad && (data.servicios || []).includes(serv.nombre)) {
+        const cantidad = data[serv.campo];
+        if (!cantidad || Number(cantidad) <= 0) {
+          showAlert(
+            `Falta la cantidad de ${serv.nombre}`,
+            `Marcó "${serv.nombre}" pero no indicó la cantidad de ${serv.unidad}.\n\nIndique la cantidad en el paso 2 (Servicios) o desmarque el servicio.`
+          );
+          setStep(2);
+          return;
+        }
+      }
+    }
+
     // Validar cantidades de equipamiento
     for (const equipo of EQUIPAMIENTO_CATALOGO) {
       if (equipo.requiereCantidad && (data.equipamiento || []).includes(equipo.nombre)) {
@@ -1060,26 +976,18 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
       }
     }
 
-    // Validar firma de ingreso (solo nuevos)
     if (!ingreso) {
       const tieneFirma = !!data.cliente_entrega_firma;
       const marcoSinFirma = !!data.cliente_entrega_sin_firma;
       const tieneMotivo = !!(data.cliente_entrega_motivo_sin_firma && data.cliente_entrega_motivo_sin_firma.trim());
 
       if (!tieneFirma && !marcoSinFirma) {
-        showAlert(
-          'Falta la firma del cliente',
-          'Por favor solicite la firma del cliente en el paso 3 (Recepción).\n\nSi el cliente no puede firmar en este momento, marque la casilla "El cliente no firmó" e indique el motivo.'
-        );
+        showAlert('Falta la firma del cliente', 'Por favor solicite la firma del cliente en el paso 3 (Recepción).\n\nSi el cliente no puede firmar en este momento, marque la casilla "El cliente no firmó" e indique el motivo.');
         setStep(3);
         return;
       }
-
       if (marcoSinFirma && !tieneMotivo) {
-        showAlert(
-          'Indique el motivo',
-          'Marcó que el cliente no firmó. Debe indicar el motivo por el cual no se obtuvo la firma de ingreso.'
-        );
+        showAlert('Indique el motivo', 'Marcó que el cliente no firmó. Debe indicar el motivo por el cual no se obtuvo la firma de ingreso.');
         setStep(3);
         return;
       }
@@ -1089,19 +997,8 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
   };
 
   const steps = esEntregado
-    ? [
-        { num: 1, label: 'Vehículo', icon: <Car size={16} /> },
-        { num: 2, label: 'Servicios', icon: <Wrench size={16} /> },
-        { num: 3, label: 'Recepción', icon: <PenLine size={16} /> },
-        { num: 4, label: 'Entrega', icon: <CheckCircle2 size={16} /> },
-        { num: 5, label: 'Observaciones', icon: <FileText size={16} /> }
-      ]
-    : [
-        { num: 1, label: 'Vehículo', icon: <Car size={16} /> },
-        { num: 2, label: 'Servicios', icon: <Wrench size={16} /> },
-        { num: 3, label: 'Recepción', icon: <PenLine size={16} /> },
-        { num: 4, label: 'Observaciones', icon: <FileText size={16} /> }
-      ];
+    ? [{ num: 1, label: 'Vehículo' }, { num: 2, label: 'Servicios' }, { num: 3, label: 'Recepción' }, { num: 4, label: 'Entrega' }, { num: 5, label: 'Observaciones' }]
+    : [{ num: 1, label: 'Vehículo' }, { num: 2, label: 'Servicios' }, { num: 3, label: 'Recepción' }, { num: 4, label: 'Observaciones' }];
 
   const totalSteps = esEntregado ? 5 : 4;
 
@@ -1109,9 +1006,7 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-slate-900">
-            {ingreso ? `Editar ingreso N°${ingreso.n_control}` : `Nuevo Ingreso`}
-          </h2>
+          <h2 className="text-xl sm:text-2xl font-bold text-slate-900">{ingreso ? `Editar ingreso N°${ingreso.n_control}` : `Nuevo Ingreso`}</h2>
           <p className="text-sm text-slate-500">Complete los datos del vehículo y servicios</p>
         </div>
       </div>
@@ -1121,7 +1016,7 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
           <AlertTriangle className="text-amber-600 flex-shrink-0 mt-0.5" size={22} />
           <div className="flex-1">
             <p className="font-medium text-amber-900">Editando un ingreso ya entregado</p>
-            <p className="text-sm text-amber-800 mt-1">Los datos administrativos se pueden modificar. Las firmas registradas están protegidas y no se pueden cambiar para mantener la validez legal del respaldo.</p>
+            <p className="text-sm text-amber-800 mt-1">Los datos administrativos se pueden modificar. Las firmas registradas están protegidas.</p>
           </div>
         </div>
       )}
@@ -1130,10 +1025,7 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
         <div className="flex items-center justify-between overflow-x-auto">
           {steps.map((s, idx) => (
             <React.Fragment key={s.num}>
-              <button
-                onClick={() => setStep(s.num)}
-                className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 flex-shrink-0"
-              >
+              <button onClick={() => setStep(s.num)} className="flex flex-col sm:flex-row items-center gap-1 sm:gap-2 flex-shrink-0">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-colors ${
                   step === s.num ? 'bg-blue-600 text-white' :
                   step > s.num ? 'bg-green-600 text-white' :
@@ -1141,9 +1033,7 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
                 }`}>
                   {step > s.num ? <Check size={14} /> : s.num}
                 </div>
-                <span className={`text-xs sm:text-sm font-medium ${step === s.num ? 'text-slate-900' : 'text-slate-500'}`}>
-                  {s.label}
-                </span>
+                <span className={`text-xs sm:text-sm font-medium ${step === s.num ? 'text-slate-900' : 'text-slate-500'}`}>{s.label}</span>
               </button>
               {idx < steps.length - 1 && <div className={`flex-1 h-0.5 mx-1 sm:mx-2 ${step > s.num ? 'bg-green-600' : 'bg-slate-200'}`} />}
             </React.Fragment>
@@ -1155,13 +1045,7 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
           <SectionTitle icon={<Building2 size={18} />} title="Datos de Ingreso" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <SelectConOtro
-              label="Nombre Empresa *"
-              valor={data.nombre_empresa}
-              opciones={EMPRESAS_CATALOGO}
-              onChange={(v) => update('nombre_empresa', v)}
-              placeholder="Nombre de la empresa"
-            />
+            <SelectConOtro label="Nombre Empresa *" valor={data.nombre_empresa} opciones={EMPRESAS_CATALOGO} onChange={(v) => update('nombre_empresa', v)} placeholder="Nombre de la empresa" />
             <Field label="N° Patente *">
               <input type="text" value={data.patente} onChange={e => update('patente', e.target.value.toUpperCase())} className="input" placeholder="AB-CD-12" />
             </Field>
@@ -1171,20 +1055,8 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
                 {TIPOS_VEHICULO.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
             </Field>
-            <SelectConOtro
-              label="Marca *"
-              valor={data.marca}
-              opciones={MARCAS_LISTA}
-              onChange={updateMarca}
-              placeholder="Marca del vehículo"
-            />
-            <SelectConOtro
-              label="Modelo"
-              valor={data.modelo}
-              opciones={modelosDisponibles}
-              onChange={(v) => update('modelo', v)}
-              placeholder={data.marca ? `Modelo de ${data.marca}` : 'Modelo del vehículo'}
-            />
+            <SelectConOtro label="Marca *" valor={data.marca} opciones={MARCAS_LISTA} onChange={updateMarca} placeholder="Marca del vehículo" />
+            <SelectConOtro label="Modelo" valor={data.modelo} opciones={modelosDisponibles} onChange={(v) => update('modelo', v)} placeholder={data.marca ? `Modelo de ${data.marca}` : 'Modelo del vehículo'} />
             <Field label="Kilometraje">
               <input type="number" value={data.kilometraje} onChange={e => update('kilometraje', e.target.value)} className="input" placeholder="Ej: 45000" />
             </Field>
@@ -1202,9 +1074,17 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-slate-200 p-5">
             <SectionTitle icon={<Wrench size={18} />} title="Servicios Realizados" />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
-              {SERVICIOS_CATALOGO.map(s => (
-                <CheckItem key={s} label={s} checked={(data.servicios || []).includes(s)} onChange={() => toggleServicio(s)} />
+            <p className="text-xs text-slate-500 mt-2">Algunos servicios requieren indicar la cantidad.</p>
+            <div className="grid grid-cols-1 gap-2 mt-3">
+              {SERVICIOS_CATALOGO.map(serv => (
+                <CheckItemConCantidad
+                  key={serv.nombre}
+                  item={serv}
+                  marcado={(data.servicios || []).includes(serv.nombre)}
+                  cantidad={serv.campo ? data[serv.campo] : null}
+                  onToggle={() => toggleServicio(serv.nombre)}
+                  onChangeCantidad={(v) => update(serv.campo, v)}
+                />
               ))}
             </div>
             <div className="mt-3">
@@ -1216,39 +1096,18 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
 
           <div className="bg-white rounded-xl border border-slate-200 p-5">
             <SectionTitle icon={<Wrench size={18} />} title="Equipamiento (cambio)" />
-            <p className="text-xs text-slate-500 mt-2">Algunos equipamientos requieren indicar cantidad (ej: metros o unidades).</p>
+            <p className="text-xs text-slate-500 mt-2">La mayoría de los equipamientos requiere indicar la cantidad.</p>
             <div className="grid grid-cols-1 gap-2 mt-3">
-              {EQUIPAMIENTO_CATALOGO.map(equipo => {
-                const marcado = (data.equipamiento || []).includes(equipo.nombre);
-                return (
-                  <div key={equipo.nombre}>
-                    <CheckItem
-                      label={equipo.requiereCantidad ? `${equipo.nombre} (requiere cantidad en ${equipo.unidad})` : equipo.nombre}
-                      checked={marcado}
-                      onChange={() => toggleEquipamiento(equipo.nombre)}
-                    />
-                    {marcado && equipo.requiereCantidad && (
-                      <div className="ml-7 mt-2 mb-1 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                        <label className="text-xs font-medium text-blue-900 block mb-1">
-                          Cantidad de {equipo.unidad} *
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            step={equipo.tipo === 'decimal' ? '0.1' : '1'}
-                            min="0"
-                            value={data[equipo.campo] || ''}
-                            onChange={e => update(equipo.campo, e.target.value)}
-                            className="input max-w-[150px]"
-                            placeholder="0"
-                          />
-                          <span className="text-sm text-blue-900 font-medium">{equipo.unidad}</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+              {EQUIPAMIENTO_CATALOGO.map(equipo => (
+                <CheckItemConCantidad
+                  key={equipo.nombre}
+                  item={equipo}
+                  marcado={(data.equipamiento || []).includes(equipo.nombre)}
+                  cantidad={equipo.campo ? data[equipo.campo] : null}
+                  onToggle={() => toggleEquipamiento(equipo.nombre)}
+                  onChangeCantidad={(v) => update(equipo.campo, v)}
+                />
+              ))}
             </div>
             <div className="mt-3">
               <Field label="Otro equipamiento">
@@ -1276,25 +1135,10 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
               <div className="sm:col-span-2">
                 {!data.cliente_entrega_sin_firma ? (
                   <>
-                    <SignaturePad
-                      label={`Firma del cliente (entrega) ${ingreso ? '' : '*'}`}
-                      value={data.cliente_entrega_firma}
-                      onChange={(v) => update('cliente_entrega_firma', v)}
-                      readOnly={esEntregado && !!data.cliente_entrega_firma}
-                    />
+                    <SignaturePad label={`Firma del cliente (entrega) ${ingreso ? '' : '*'}`} value={data.cliente_entrega_firma} onChange={(v) => update('cliente_entrega_firma', v)} readOnly={esEntregado && !!data.cliente_entrega_firma} />
                     {!esEntregado && !data.cliente_entrega_firma && (
                       <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setData(prev => ({
-                              ...prev,
-                              cliente_entrega_sin_firma: true,
-                              cliente_entrega_firma: ''
-                            }));
-                          }}
-                          className="w-full text-left flex items-start gap-3 cursor-pointer hover:bg-amber-100 -m-1 p-1 rounded transition-colors"
-                        >
+                        <button type="button" onClick={() => { setData(prev => ({ ...prev, cliente_entrega_sin_firma: true, cliente_entrega_firma: '' })); }} className="w-full text-left flex items-start gap-3 cursor-pointer hover:bg-amber-100 -m-1 p-1 rounded transition-colors">
                           <div className="w-5 h-5 border-2 border-amber-600 rounded bg-white flex-shrink-0 mt-0.5"></div>
                           <div className="text-xs text-amber-900 flex-1">
                             <span className="font-medium block">El cliente no firmó en el momento del ingreso</span>
@@ -1314,26 +1158,10 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
                       </div>
                     </div>
                     <Field label="Motivo *">
-                      <textarea
-                        value={data.cliente_entrega_motivo_sin_firma}
-                        onChange={e => update('cliente_entrega_motivo_sin_firma', e.target.value)}
-                        className="input min-h-[80px] resize-y"
-                        placeholder="Ej: El chofer dejó el vehículo y se retiró sin esperar el registro."
-                        disabled={esEntregado}
-                      />
+                      <textarea value={data.cliente_entrega_motivo_sin_firma} onChange={e => update('cliente_entrega_motivo_sin_firma', e.target.value)} className="input min-h-[80px] resize-y" placeholder="Ej: El chofer dejó el vehículo y se retiró sin esperar el registro." disabled={esEntregado} />
                     </Field>
                     {!esEntregado && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setData(prev => ({
-                            ...prev,
-                            cliente_entrega_sin_firma: false,
-                            cliente_entrega_motivo_sin_firma: ''
-                          }));
-                        }}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-amber-400 text-amber-800 hover:bg-amber-100 hover:border-amber-500 rounded-md text-xs font-medium cursor-pointer transition-colors"
-                      >
+                      <button type="button" onClick={() => { setData(prev => ({ ...prev, cliente_entrega_sin_firma: false, cliente_entrega_motivo_sin_firma: '' })); }} className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-amber-400 text-amber-800 hover:bg-amber-100 hover:border-amber-500 rounded-md text-xs font-medium cursor-pointer transition-colors">
                         <ChevronLeft size={14} /> Volver a solicitar firma
                       </button>
                     )}
@@ -1365,37 +1193,20 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
           <div className="bg-white rounded-xl border border-slate-200 p-5">
             <SectionTitle icon={<Wrench size={18} />} title="Personal Luandi entrega el vehículo" />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
-              <Field label="Fecha">
-                <input type="date" value={data.luandi_entrega_fecha} onChange={e => update('luandi_entrega_fecha', e.target.value)} className="input" />
-              </Field>
-              <Field label="Hora">
-                <input type="time" value={data.luandi_entrega_hora} onChange={e => update('luandi_entrega_hora', e.target.value)} className="input" />
-              </Field>
-              <Field label="Entregado por (Luandi)" className="sm:col-span-2">
-                <input type="text" value={data.luandi_entrega_persona} onChange={e => update('luandi_entrega_persona', e.target.value)} className="input" placeholder="Nombre del personal Luandi" />
-              </Field>
+              <Field label="Fecha"><input type="date" value={data.luandi_entrega_fecha} onChange={e => update('luandi_entrega_fecha', e.target.value)} className="input" /></Field>
+              <Field label="Hora"><input type="time" value={data.luandi_entrega_hora} onChange={e => update('luandi_entrega_hora', e.target.value)} className="input" /></Field>
+              <Field label="Entregado por (Luandi)" className="sm:col-span-2"><input type="text" value={data.luandi_entrega_persona} onChange={e => update('luandi_entrega_persona', e.target.value)} className="input" placeholder="Nombre del personal Luandi" /></Field>
             </div>
           </div>
 
           <div className="bg-white rounded-xl border border-slate-200 p-5">
             <SectionTitle icon={<Building2 size={18} />} title="Cliente recibe el vehículo" />
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
-              <Field label="Fecha">
-                <input type="date" value={data.cliente_recibe_fecha} onChange={e => update('cliente_recibe_fecha', e.target.value)} className="input" />
-              </Field>
-              <Field label="Hora">
-                <input type="time" value={data.cliente_recibe_hora} onChange={e => update('cliente_recibe_hora', e.target.value)} className="input" />
-              </Field>
-              <Field label="Recibido por (cliente)" className="sm:col-span-2">
-                <input type="text" value={data.cliente_recibe_persona} onChange={e => update('cliente_recibe_persona', e.target.value)} className="input" placeholder="Nombre completo de quien retira el vehículo" />
-              </Field>
+              <Field label="Fecha"><input type="date" value={data.cliente_recibe_fecha} onChange={e => update('cliente_recibe_fecha', e.target.value)} className="input" /></Field>
+              <Field label="Hora"><input type="time" value={data.cliente_recibe_hora} onChange={e => update('cliente_recibe_hora', e.target.value)} className="input" /></Field>
+              <Field label="Recibido por (cliente)" className="sm:col-span-2"><input type="text" value={data.cliente_recibe_persona} onChange={e => update('cliente_recibe_persona', e.target.value)} className="input" placeholder="Nombre completo de quien retira el vehículo" /></Field>
               <div className="sm:col-span-2">
-                <SignaturePad
-                  label="Firma del cliente (conformidad de retiro)"
-                  value={data.cliente_recibe_firma}
-                  onChange={(v) => update('cliente_recibe_firma', v)}
-                  readOnly={!!data.cliente_recibe_firma}
-                />
+                <SignaturePad label="Firma del cliente (conformidad de retiro)" value={data.cliente_recibe_firma} onChange={(v) => update('cliente_recibe_firma', v)} readOnly={!!data.cliente_recibe_firma} />
               </div>
             </div>
           </div>
@@ -1406,21 +1217,11 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
         <div className="bg-white rounded-xl border border-slate-200 p-5">
           <SectionTitle icon={<FileText size={18} />} title="Observaciones" />
           <Field label="Comentarios o detalles adicionales al ingreso">
-            <textarea
-              value={data.observaciones}
-              onChange={e => update('observaciones', e.target.value)}
-              className="input min-h-[100px] resize-y"
-              placeholder="Anote cualquier observación relevante: estado del vehículo, hallazgos, recomendaciones, etc."
-            />
+            <textarea value={data.observaciones} onChange={e => update('observaciones', e.target.value)} className="input min-h-[100px] resize-y" placeholder="Anote cualquier observación relevante." />
           </Field>
           {esEntregado && (
             <Field label="Observaciones de entrega" className="mt-3">
-              <textarea
-                value={data.observaciones_entrega || ''}
-                onChange={e => update('observaciones_entrega', e.target.value)}
-                className="input min-h-[100px] resize-y"
-                placeholder="Observaciones al momento del retiro"
-              />
+              <textarea value={data.observaciones_entrega || ''} onChange={e => update('observaciones_entrega', e.target.value)} className="input min-h-[100px] resize-y" placeholder="Observaciones al momento del retiro" />
             </Field>
           )}
           <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-100">
@@ -1441,11 +1242,7 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
         <div className="flex gap-2 order-1 sm:order-2">
           {step > 1 && <button onClick={() => setStep(step - 1)} disabled={saving} className="btn-secondary flex-1 sm:flex-none disabled:opacity-50"><ChevronLeft size={16} /> Anterior</button>}
           {step < totalSteps && (
-            <button
-              onClick={() => puedeAvanzar() && setStep(step + 1)}
-              disabled={!puedeAvanzar() || saving}
-              className="btn-primary flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed"
-            >
+            <button onClick={() => puedeAvanzar() && setStep(step + 1)} disabled={!puedeAvanzar() || saving} className="btn-primary flex-1 sm:flex-none disabled:opacity-50 disabled:cursor-not-allowed">
               Siguiente <ChevronRight size={16} />
             </button>
           )}
@@ -1475,19 +1272,10 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving, showAlert }
   const update = (field, value) => setData({ ...data, [field]: value });
 
   const intentarGuardar = () => {
-    if (!data.luandi_entrega_persona) {
-      showAlert('Falta información', 'Indique el nombre del personal Luandi que entrega el vehículo.');
-      return;
-    }
-    if (!data.cliente_recibe_persona) {
-      showAlert('Falta información', 'Indique el nombre del cliente que recibe el vehículo.');
-      return;
-    }
+    if (!data.luandi_entrega_persona) { showAlert('Falta información', 'Indique el nombre del personal Luandi que entrega el vehículo.'); return; }
+    if (!data.cliente_recibe_persona) { showAlert('Falta información', 'Indique el nombre del cliente que recibe el vehículo.'); return; }
     if (!data.cliente_recibe_firma) {
-      showAlert(
-        'Falta la firma de conformidad',
-        'La firma del cliente al recibir el vehículo es obligatoria. Por favor solicite la firma antes de confirmar la entrega.\n\nLa firma de retiro es el respaldo de conformidad con los servicios realizados.'
-      );
+      showAlert('Falta la firma de conformidad', 'La firma del cliente al recibir el vehículo es obligatoria. Por favor solicite la firma antes de confirmar la entrega.');
       return;
     }
     onGuardar(data);
@@ -1503,37 +1291,21 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving, showAlert }
       <div className="bg-white rounded-xl border border-slate-200 p-5">
         <SectionTitle icon={<Wrench size={18} />} title="Personal Luandi entrega el vehículo" />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
-          <Field label="Fecha">
-            <input type="date" value={data.luandi_entrega_fecha} onChange={e => update('luandi_entrega_fecha', e.target.value)} className="input" />
-          </Field>
-          <Field label="Hora">
-            <input type="time" value={data.luandi_entrega_hora} onChange={e => update('luandi_entrega_hora', e.target.value)} className="input" />
-          </Field>
-          <Field label="Entregado por (Luandi) *" className="sm:col-span-2">
-            <input type="text" value={data.luandi_entrega_persona} onChange={e => update('luandi_entrega_persona', e.target.value)} className="input" placeholder="Nombre del personal Luandi" />
-          </Field>
+          <Field label="Fecha"><input type="date" value={data.luandi_entrega_fecha} onChange={e => update('luandi_entrega_fecha', e.target.value)} className="input" /></Field>
+          <Field label="Hora"><input type="time" value={data.luandi_entrega_hora} onChange={e => update('luandi_entrega_hora', e.target.value)} className="input" /></Field>
+          <Field label="Entregado por (Luandi) *" className="sm:col-span-2"><input type="text" value={data.luandi_entrega_persona} onChange={e => update('luandi_entrega_persona', e.target.value)} className="input" placeholder="Nombre del personal Luandi" /></Field>
         </div>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-5">
         <SectionTitle icon={<Building2 size={18} />} title="Cliente recibe el vehículo" />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-3">
-          <Field label="Fecha">
-            <input type="date" value={data.cliente_recibe_fecha} onChange={e => update('cliente_recibe_fecha', e.target.value)} className="input" />
-          </Field>
-          <Field label="Hora">
-            <input type="time" value={data.cliente_recibe_hora} onChange={e => update('cliente_recibe_hora', e.target.value)} className="input" />
-          </Field>
-          <Field label="Recibido por (cliente) *" className="sm:col-span-2">
-            <input type="text" value={data.cliente_recibe_persona} onChange={e => update('cliente_recibe_persona', e.target.value)} className="input" placeholder="Nombre completo de quien retira el vehículo" />
-          </Field>
+          <Field label="Fecha"><input type="date" value={data.cliente_recibe_fecha} onChange={e => update('cliente_recibe_fecha', e.target.value)} className="input" /></Field>
+          <Field label="Hora"><input type="time" value={data.cliente_recibe_hora} onChange={e => update('cliente_recibe_hora', e.target.value)} className="input" /></Field>
+          <Field label="Recibido por (cliente) *" className="sm:col-span-2"><input type="text" value={data.cliente_recibe_persona} onChange={e => update('cliente_recibe_persona', e.target.value)} className="input" placeholder="Nombre completo de quien retira el vehículo" /></Field>
           <div className="sm:col-span-2">
-            <SignaturePad
-              label="Firma del cliente (conformidad de retiro) *"
-              value={data.cliente_recibe_firma}
-              onChange={(v) => update('cliente_recibe_firma', v)}
-            />
-            <p className="text-xs text-slate-500 mt-1">La firma del cliente confirma la conformidad con los servicios realizados y el estado del vehículo al retirarlo. <strong>Esta firma es obligatoria.</strong></p>
+            <SignaturePad label="Firma del cliente (conformidad de retiro) *" value={data.cliente_recibe_firma} onChange={(v) => update('cliente_recibe_firma', v)} />
+            <p className="text-xs text-slate-500 mt-1">La firma del cliente confirma la conformidad con los servicios realizados. <strong>Esta firma es obligatoria.</strong></p>
           </div>
         </div>
       </div>
@@ -1541,12 +1313,7 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving, showAlert }
       <div className="bg-white rounded-xl border border-slate-200 p-5">
         <SectionTitle icon={<FileText size={18} />} title="Observaciones de entrega" />
         <Field label="Observaciones adicionales al momento del retiro">
-          <textarea
-            value={data.observaciones_entrega}
-            onChange={e => update('observaciones_entrega', e.target.value)}
-            className="input min-h-[100px] resize-y"
-            placeholder="Anote cualquier detalle relevante al momento de la entrega"
-          />
+          <textarea value={data.observaciones_entrega} onChange={e => update('observaciones_entrega', e.target.value)} className="input min-h-[100px] resize-y" placeholder="Anote cualquier detalle relevante al momento de la entrega" />
         </Field>
       </div>
 
@@ -1585,14 +1352,9 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
           </div>
         </div>
 
-        <button
-          onClick={onAbrirSelector}
-          className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 flex items-center justify-between hover:from-blue-100 hover:to-indigo-100 transition-colors text-left"
-        >
+        <button onClick={onAbrirSelector} className="bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl p-4 flex items-center justify-between hover:from-blue-100 hover:to-indigo-100 transition-colors text-left">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white">
-              <Calendar size={20} />
-            </div>
+            <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white"><Calendar size={20} /></div>
             <div>
               <p className="text-xs text-blue-700 font-medium">{esMesActual ? 'Mes actual' : 'Período seleccionado'}</p>
               <p className="font-bold text-blue-900">{periodoLabel}</p>
@@ -1631,16 +1393,10 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
       {ingresos.length === 0 ? (
         <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
           <ClipboardList className="mx-auto text-slate-300 mb-3" size={48} />
-          <p className="text-slate-500 font-medium">
-            {totalDelPeriodo === 0 ? `No hay registros en ${periodoLabel}` : 'No hay registros que coincidan'}
-          </p>
-          <p className="text-sm text-slate-400 mt-1">
-            {totalDelPeriodo === 0 ? 'Cambie de período o cree un nuevo ingreso' : 'Pruebe ajustar los filtros'}
-          </p>
+          <p className="text-slate-500 font-medium">{totalDelPeriodo === 0 ? `No hay registros en ${periodoLabel}` : 'No hay registros que coincidan'}</p>
+          <p className="text-sm text-slate-400 mt-1">{totalDelPeriodo === 0 ? 'Cambie de período o cree un nuevo ingreso' : 'Pruebe ajustar los filtros'}</p>
           {totalDelPeriodo === 0 && (
-            <button onClick={onAbrirSelector} className="btn-secondary mt-4">
-              <FolderOpen size={16} /> Ver otros períodos
-            </button>
+            <button onClick={onAbrirSelector} className="btn-secondary mt-4"><FolderOpen size={16} /> Ver otros períodos</button>
           )}
         </div>
       ) : (
@@ -1671,12 +1427,8 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
                       <div className="flex justify-end gap-1">
                         <IconBtn onClick={() => onVer(i)} icon={<Eye size={14} />} title="Ver" />
                         <IconBtn onClick={() => onEditar(i)} icon={<Edit2 size={14} />} title="Editar" />
-                        {i.estado === 'en_proceso' && (
-                          <IconBtn onClick={() => onEntregar(i)} icon={<Check size={14} />} title="Registrar entrega" color="green" />
-                        )}
-                        {i.estado === 'entregado' && (
-                          <IconBtn onClick={() => onRevertir(i)} icon={<RotateCcw size={14} />} title="Revertir a en proceso" color="amber" />
-                        )}
+                        {i.estado === 'en_proceso' && <IconBtn onClick={() => onEntregar(i)} icon={<Check size={14} />} title="Registrar entrega" color="green" />}
+                        {i.estado === 'entregado' && <IconBtn onClick={() => onRevertir(i)} icon={<RotateCcw size={14} />} title="Revertir a en proceso" color="amber" />}
                         <IconBtn onClick={() => onEliminar(i.id)} icon={<Trash2 size={14} />} title="Eliminar" color="red" />
                       </div>
                     </td>
@@ -1731,9 +1483,7 @@ function DetalleView({ ingreso, onVolver, onPDF, onEntregar, onEditar, onReverti
           <button onClick={onVolver} className="btn-secondary"><ChevronLeft size={16} /> Volver</button>
           <button onClick={onPDF} className="btn-secondary"><FileText size={16} /> PDF</button>
           <button onClick={onEditar} className="btn-secondary"><Edit2 size={16} /> Editar</button>
-          {ingreso.estado === 'en_proceso' && (
-            <button onClick={onEntregar} className="btn-primary"><Check size={16} /> Entregar</button>
-          )}
+          {ingreso.estado === 'en_proceso' && <button onClick={onEntregar} className="btn-primary"><Check size={16} /> Entregar</button>}
           {ingreso.estado === 'entregado' && (
             <button onClick={onRevertir} className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-amber-100 hover:bg-amber-200 text-amber-800 rounded-lg text-sm font-medium transition-colors">
               <RotateCcw size={16} /> Revertir entrega
@@ -1759,7 +1509,13 @@ function DetalleView({ ingreso, onVolver, onPDF, onEntregar, onEditar, onReverti
               <p className="text-sm text-slate-400">Ninguno marcado</p>
             ) : (
               <ul className="text-sm text-slate-700 space-y-0.5">
-                {(ingreso.servicios || []).map(s => <li key={s}>• {s}</li>)}
+                {(ingreso.servicios || []).map(s => {
+                  const serv = SERVICIOS_CATALOGO.find(x => x.nombre === s);
+                  const cantidad = serv && serv.campo ? ingreso[serv.campo] : null;
+                  return (
+                    <li key={s}>• {s}{cantidad && <span className="font-semibold text-blue-700"> — {cantidad} {serv.unidad}</span>}</li>
+                  );
+                })}
                 {ingreso.servicios_otros && <li>• {ingreso.servicios_otros}</li>}
               </ul>
             )}
@@ -1774,10 +1530,7 @@ function DetalleView({ ingreso, onVolver, onPDF, onEntregar, onEditar, onReverti
                   const equipo = EQUIPAMIENTO_CATALOGO.find(e => e.nombre === s);
                   const cantidad = equipo && equipo.campo ? ingreso[equipo.campo] : null;
                   return (
-                    <li key={s}>
-                      • {s}
-                      {cantidad && <span className="font-semibold text-blue-700"> — {cantidad} {equipo.unidad}</span>}
-                    </li>
+                    <li key={s}>• {s}{cantidad && <span className="font-semibold text-blue-700"> — {cantidad} {equipo.unidad}</span>}</li>
                   );
                 })}
                 {ingreso.equipamiento_otros && <li>• {ingreso.equipamiento_otros}</li>}
@@ -1869,17 +1622,6 @@ function SectionTitle({ icon, title }) {
   );
 }
 
-function CheckItem({ label, checked, onChange }) {
-  return (
-    <label className={`flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer transition-colors ${
-      checked ? 'bg-blue-50 border-blue-200' : 'border-slate-200 hover:bg-slate-50'
-    }`}>
-      <input type="checkbox" checked={checked} onChange={onChange} className="w-4 h-4 rounded text-blue-600" />
-      <span className="text-sm text-slate-700">{label}</span>
-    </label>
-  );
-}
-
 function IconBtn({ onClick, icon, title, color = 'slate' }) {
   const colors = {
     slate: 'text-slate-600 hover:bg-slate-100',
@@ -1887,9 +1629,7 @@ function IconBtn({ onClick, icon, title, color = 'slate' }) {
     amber: 'text-amber-700 hover:bg-amber-50',
     red: 'text-red-600 hover:bg-red-50'
   };
-  return (
-    <button onClick={onClick} title={title} className={`p-1.5 rounded-md ${colors[color]}`}>{icon}</button>
-  );
+  return <button onClick={onClick} title={title} className={`p-1.5 rounded-md ${colors[color]}`}>{icon}</button>;
 }
 
 function DetalleCard({ title, icon, children }) {
@@ -1911,16 +1651,17 @@ function DetalleRow({ label, value }) {
 }
 
 function generarBloqueReporteIndividual(i, pageBreakAntes = false) {
-  const servicios = SERVICIOS_CATALOGO.map(s => `
-    <tr><td>${s}</td><td style="text-align:center;width:30px">${(i.servicios || []).includes(s) ? '✓' : ''}</td></tr>
-  `).join('');
-  
+  const servicios = SERVICIOS_CATALOGO.map(s => {
+    const marcado = (i.servicios || []).includes(s.nombre);
+    const cantidad = s.campo ? i[s.campo] : null;
+    const cantidadHTML = (marcado && cantidad) ? ` <b style="color:#1e40af">— ${cantidad} ${s.unidad}</b>` : '';
+    return `<tr><td>${s.nombre}${cantidadHTML}</td><td style="text-align:center;width:30px">${marcado ? '✓' : ''}</td></tr>`;
+  }).join('');
+
   const equipos = EQUIPAMIENTO_CATALOGO.map(eq => {
     const marcado = (i.equipamiento || []).includes(eq.nombre);
     const cantidad = eq.campo ? i[eq.campo] : null;
-    const cantidadHTML = (marcado && cantidad) 
-      ? ` <b style="color:#1e40af">— ${cantidad} ${eq.unidad}</b>` 
-      : '';
+    const cantidadHTML = (marcado && cantidad) ? ` <b style="color:#1e40af">— ${cantidad} ${eq.unidad}</b>` : '';
     return `<tr><td>${eq.nombre}${cantidadHTML}</td><td style="text-align:center;width:30px">${marcado ? '✓' : ''}</td></tr>`;
   }).join('');
 
@@ -2010,41 +1751,4 @@ function getEstilosReporte() {
   return `
 @page { size: A4; margin: 1cm; }
 * { box-sizing: border-box; }
-body { font-family: Arial, sans-serif; font-size: 11px; color: #1e293b; margin: 0; padding: 0; }
-.reporte-container { max-width: 800px; margin: 0 auto 0 auto; border: 2px solid #1e293b; }
-.header { display: flex; justify-content: space-between; align-items: center; padding: 12px; border-bottom: 2px solid #1e293b; }
-.header-title { font-size: 16px; font-weight: bold; color: #1e40af; letter-spacing: 1px; }
-.logo { font-size: 12px; font-weight: bold; color: #1e40af; text-align: right; }
-.n-control { text-align: center; padding: 8px; font-size: 14px; font-weight: bold; border-bottom: 2px solid #1e293b; }
-.section-title { background: #64748b; color: white; padding: 6px 12px; font-weight: bold; text-align: center; font-size: 12px; }
-table { width: 100%; border-collapse: collapse; }
-td { border: 1px solid #1e293b; padding: 6px 8px; }
-.label { font-weight: bold; width: 25%; }
-.checkbox-table td { padding: 4px 8px; }
-.firma-box { border: 1px solid #1e293b; height: 80px; padding: 4px; text-align: center; vertical-align: middle; }
-.firma-img { max-height: 70px; max-width: 100%; }
-.footer { text-align: center; padding: 8px; font-size: 9px; border-top: 2px solid #1e293b; }
-@media print { body { print-color-adjust: exact; -webkit-print-color-adjust: exact; } }
-`;
-}
-
-function generarHTMLReporte(i) {
-  return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Ingreso N°${i.n_control} - Luandi Servicios</title>
-<style>${getEstilosReporte()}</style></head><body>
-${generarBloqueReporteIndividual(i, false)}
-</body></html>`;
-}
-
-function generarHTMLRespaldosMes(ingresos, periodoLabel, empresaFiltrada) {
-  const bloques = ingresos.map((i, idx) => generarBloqueReporteIndividual(i, idx > 0)).join('\n');
-  const tituloPestana = empresaFiltrada
-    ? `Respaldos ${periodoLabel} - ${empresaFiltrada}`
-    : `Respaldos ${periodoLabel}`;
-
-  return `<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>${tituloPestana} - Luandi Servicios</title>
-<style>${getEstilosReporte()}</style></head><body>
-${bloques}
-</body></html>`;
-}
+body { font-family: Arial, sans-serif; font-size: 11px; color: #1e293b; margin: 0;
