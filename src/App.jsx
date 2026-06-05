@@ -1751,4 +1751,64 @@ function getEstilosReporte() {
   return `
 @page { size: A4; margin: 1cm; }
 * { box-sizing: border-box; }
-body { font-family: Arial, sans-serif; font-size: 11px; color: #1e293b; margin: 0;
+body { font-family: Arial, sans-serif; font-size: 11px; color: #1e293b; margin: 0; padding: 0; }
+.reporte-container { width: 100%; max-width: 19cm; margin: 0 auto; padding: 8px 0; }
+.header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #1e40af; padding-bottom: 8px; margin-bottom: 8px; }
+.header-title { font-size: 14px; font-weight: bold; letter-spacing: 0.3px; }
+.logo { text-align: right; font-size: 13px; font-weight: bold; color: #1e40af; line-height: 1.2; }
+.n-control { text-align: right; font-size: 13px; font-weight: bold; color: #dc2626; margin-bottom: 6px; }
+.section-title { background: #1e40af; color: #fff; font-weight: bold; font-size: 11px; padding: 4px 8px; margin-top: 8px; text-transform: uppercase; letter-spacing: 0.3px; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 2px; }
+td { border: 1px solid #cbd5e1; padding: 4px 6px; vertical-align: top; font-size: 10px; }
+td.label { background: #f1f5f9; font-weight: bold; font-size: 9px; white-space: nowrap; color: #334155; }
+.checkbox-table > tbody > tr > td { border: 1px solid #cbd5e1; padding: 0; }
+.checkbox-table table { margin: 0; }
+.checkbox-table table td { border: 0; border-bottom: 1px solid #e2e8f0; padding: 3px 6px; }
+.firma-box { height: 70px; text-align: center; vertical-align: middle; }
+.firma-img { max-height: 62px; max-width: 95%; object-fit: contain; }
+.footer { margin-top: 10px; padding-top: 6px; border-top: 1px solid #cbd5e1; font-size: 8px; color: #64748b; text-align: center; }
+.respaldo-cover { text-align: center; padding: 24px 0; border-bottom: 2px solid #1e40af; margin-bottom: 12px; }
+.respaldo-cover h1 { font-size: 18px; color: #1e40af; margin: 0 0 6px; }
+.respaldo-cover p { font-size: 11px; color: #475569; margin: 2px 0; }
+@media print { .no-print { display: none; } }
+`;
+}
+
+function generarHTMLReporte(ingreso) {
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Ingreso N°${ingreso.n_control} - Luandi Servicios</title>
+<style>${getEstilosReporte()}</style>
+</head>
+<body>
+${generarBloqueReporteIndividual(ingreso)}
+</body>
+</html>`;
+}
+
+function generarHTMLRespaldosMes(ingresosList, periodoLabel, filterEmpresa) {
+  const filtroTexto = filterEmpresa ? ` · Empresa: ${filterEmpresa}` : '';
+  const cover = `
+<div class="respaldo-cover">
+  <h1>RESPALDOS DE INGRESOS</h1>
+  <p><b>Luandi Servicios SPA</b></p>
+  <p>Período: ${periodoLabel}${filtroTexto}</p>
+  <p>${ingresosList.length} ${ingresosList.length === 1 ? 'registro' : 'registros'} · Generado el ${new Date().toLocaleDateString('es-CL')}</p>
+</div>`;
+  // Cada reporte en su propia hoja (salto de página antes de cada uno)
+  const bloques = ingresosList.map(i => generarBloqueReporteIndividual(i, true)).join('');
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Respaldos ${periodoLabel} - Luandi Servicios</title>
+<style>${getEstilosReporte()}</style>
+</head>
+<body>
+${cover}
+${bloques}
+</body>
+</html>`;
+}
