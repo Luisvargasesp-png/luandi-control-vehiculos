@@ -11,7 +11,9 @@ const EMPRESAS_CATALOGO = [
   'BESALCO',
   'CBS',
   'COLORADO (SIGMA)',
-  'COMTECSA',
+  'COMTECSA C-132',
+  'COMTECSA PEM 612',
+  'COMTECSA SITES',
   'ECHEVERRIA IZQUIERDO',
   'JEJ',
   'MINING TAG',
@@ -93,6 +95,19 @@ function getPeriodoKey(fecha) {
 function getPeriodoLabel(periodoKey) {
   const [year, month] = periodoKey.split('-');
   return `${MESES[parseInt(month) - 1]} ${year}`;
+}
+
+// ===== Patente =====
+// Se ingresa y almacena SIN guion ni espacios (solo letras/números, máx 6).
+// Se MUESTRA (app, PDF, Excel) con formato XXYY-12 (4 caracteres, guion, 2 caracteres).
+function limpiarPatente(valor) {
+  return (valor || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+}
+
+function formatPatente(valor) {
+  const limpia = (valor || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (limpia.length === 6) return `${limpia.slice(0, 4)}-${limpia.slice(4)}`;
+  return limpia;
 }
 
 function dbToApp(row) {
@@ -185,8 +200,8 @@ function SignaturePad({ value, onChange, label, readOnly = false }) {
     ctx.scale(2, 2);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#1d4ed8';
+    ctx.lineWidth = 3.2;
 
     if (value) {
       const img = new Image();
@@ -257,7 +272,7 @@ function SignaturePad({ value, onChange, label, readOnly = false }) {
       <div className={`relative border-2 ${readOnly ? 'border-slate-200 bg-slate-50' : 'border-dashed border-slate-300 bg-white'} rounded-lg`}>
         <canvas
           ref={canvasRef}
-          className={`w-full h-32 rounded-lg ${readOnly ? 'cursor-not-allowed' : 'touch-none cursor-crosshair'}`}
+          className={`w-full h-44 rounded-lg ${readOnly ? 'cursor-not-allowed' : 'touch-none cursor-crosshair'}`}
           onMouseDown={startDrawing}
           onMouseMove={draw}
           onMouseUp={stopDrawing}
@@ -343,7 +358,11 @@ function SelectConOtro({ label, valor, opciones, onChange, placeholder, uppercas
   const [usandoOtro, setUsandoOtro] = useState(esOtro);
 
   useEffect(() => {
-    setUsandoOtro(valor && !opciones.includes(valor));
+    // Solo activa el modo "Otro" cuando hay un valor personalizado (ej: editando un registro).
+    // Nunca lo desactiva por sí solo: eso hacía que al pulsar "Otro" el campo apareciera y desapareciera.
+    if (valor && !opciones.includes(valor)) {
+      setUsandoOtro(true);
+    }
   }, [valor, opciones]);
 
   const handleSelectChange = (e) => {
@@ -417,6 +436,8 @@ export default function LuandiApp() {
   const [filterPatente, setFilterPatente] = useState('');
   const [filterEmpresa, setFilterEmpresa] = useState('');
   const [filterEstado, setFilterEstado] = useState('todos');
+  const [filterServicio, setFilterServicio] = useState('');
+  const [filterEquipamiento, setFilterEquipamiento] = useState('');
   const [periodoSeleccionado, setPeriodoSeleccionado] = useState(getPeriodoKey(new Date()));
   const [mostrarSelectorPeriodo, setMostrarSelectorPeriodo] = useState(false);
   const [toast, setToast] = useState(null);
@@ -561,10 +582,12 @@ export default function LuandiApp() {
   const ingresosDelPeriodo = ingresos.filter(i => getPeriodoKey(i.fecha_creacion) === periodoSeleccionado);
 
   const ingresosFiltrados = ingresosDelPeriodo.filter(i => {
-    const matchPatente = !filterPatente || (i.patente || '').toLowerCase().includes(filterPatente.toLowerCase());
+    const matchPatente = !filterPatente || limpiarPatente(i.patente).includes(limpiarPatente(filterPatente));
     const matchEmpresa = !filterEmpresa || (i.nombre_empresa || '').toLowerCase().includes(filterEmpresa.toLowerCase());
     const matchEstado = filterEstado === 'todos' || i.estado === filterEstado;
-    return matchPatente && matchEmpresa && matchEstado;
+    const matchServicio = !filterServicio || (i.servicios || []).includes(filterServicio);
+    const matchEquipamiento = !filterEquipamiento || (i.equipamiento || []).includes(filterEquipamiento);
+    return matchPatente && matchEmpresa && matchEstado && matchServicio && matchEquipamiento;
   });
 
   const filtrosActivos = () => {
@@ -572,6 +595,8 @@ export default function LuandiApp() {
     if (filterEmpresa) partes.push(filterEmpresa.replace(/[^a-zA-Z0-9]/g, '_'));
     if (filterPatente) partes.push(filterPatente.replace(/[^a-zA-Z0-9]/g, '_'));
     if (filterEstado !== 'todos') partes.push(filterEstado === 'entregado' ? 'Entregados' : 'EnProceso');
+    if (filterServicio) partes.push('Serv_' + filterServicio.replace(/[^a-zA-Z0-9]/g, '_'));
+    if (filterEquipamiento) partes.push('Equip_' + filterEquipamiento.replace(/[^a-zA-Z0-9]/g, '_'));
     return partes.join('_');
   };
 
@@ -580,7 +605,7 @@ export default function LuandiApp() {
     new Date(i.fecha_creacion).toLocaleDateString('es-CL'),
     i.estado === 'entregado' ? 'Entregado' : 'En proceso',
     i.nombre_empresa || '',
-    i.patente || '',
+    formatPatente(i.patente),
     i.tipo_vehiculo || '',
     i.marca || '',
     i.modelo || '',
@@ -661,7 +686,7 @@ export default function LuandiApp() {
     const win = window.open('', '_blank');
     if (!win) { showToast('Permita ventanas emergentes para descargar el PDF', 'error'); return; }
     const ordenados = [...ingresosFiltrados].sort((a, b) => a.n_control - b.n_control);
-    win.document.write(generarHTMLRespaldosMes(ordenados, getPeriodoLabel(periodoSeleccionado), filterEmpresa));
+    win.document.write(generarHTMLRespaldosMes(ordenados, getPeriodoLabel(periodoSeleccionado), filterEmpresa, filterServicio, filterEquipamiento));
     win.document.close();
     setTimeout(() => win.print(), 800);
   };
@@ -744,9 +769,13 @@ export default function LuandiApp() {
             filterPatente={filterPatente}
             filterEmpresa={filterEmpresa}
             filterEstado={filterEstado}
+            filterServicio={filterServicio}
+            filterEquipamiento={filterEquipamiento}
             setFilterPatente={setFilterPatente}
             setFilterEmpresa={setFilterEmpresa}
             setFilterEstado={setFilterEstado}
+            setFilterServicio={setFilterServicio}
+            setFilterEquipamiento={setFilterEquipamiento}
             onAbrirSelector={() => setMostrarSelectorPeriodo(true)}
             onVer={(i) => { setSelectedIngreso(i); setView('detalle'); }}
             onEntregar={(i) => { setSelectedIngreso(i); setView('entrega'); }}
@@ -855,7 +884,7 @@ function HomeView({ ingresos, ingresosDelPeriodo, periodoLabel, onNuevo, onHisto
                   <div className="w-9 h-9 bg-blue-50 text-blue-700 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0">#{i.n_control}</div>
                   <div className="min-w-0">
                     <p className="font-medium text-slate-900 text-sm truncate">{i.nombre_empresa || 'Sin empresa'}</p>
-                    <p className="text-xs text-slate-500 truncate">{i.patente} · {i.marca} {i.modelo}</p>
+                    <p className="text-xs text-slate-500 truncate">{formatPatente(i.patente)} · {i.marca} {i.modelo}</p>
                   </div>
                 </div>
                 <EstadoBadge estado={i.estado} />
@@ -1056,7 +1085,10 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <SelectConOtro label="Nombre Empresa *" valor={data.nombre_empresa} opciones={EMPRESAS_CATALOGO} onChange={(v) => update('nombre_empresa', v)} placeholder="Nombre de la empresa" />
             <Field label="N° Patente *">
-              <input type="text" value={data.patente} onChange={e => update('patente', e.target.value.toUpperCase())} className="input" placeholder="AB-CD-12" />
+              <input type="text" value={data.patente} onChange={e => update('patente', limpiarPatente(e.target.value))} className="input" placeholder="Ej: BCDF12 (sin guion)" maxLength={6} />
+              {limpiarPatente(data.patente).length === 6 && (
+                <p className="text-xs text-blue-600 mt-1">Se mostrará como: <strong>{formatPatente(data.patente)}</strong></p>
+              )}
             </Field>
             <Field label="Tipo de Vehículo *">
               <select value={data.tipo_vehiculo} onChange={e => update('tipo_vehiculo', e.target.value)} className="input">
@@ -1294,7 +1326,7 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving, showAlert }
     <div className="space-y-5">
       <div>
         <h2 className="text-xl sm:text-2xl font-bold text-slate-900">Entrega del vehículo N°{ingreso.n_control}</h2>
-        <p className="text-sm text-slate-500">{ingreso.nombre_empresa} · {ingreso.patente} · {ingreso.marca} {ingreso.modelo}</p>
+        <p className="text-sm text-slate-500">{ingreso.nombre_empresa} · {formatPatente(ingreso.patente)} · {ingreso.marca} {ingreso.modelo}</p>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-5">
@@ -1336,8 +1368,8 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving, showAlert }
   );
 }
 
-function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, filterPatente, filterEmpresa, filterEstado, setFilterPatente, setFilterEmpresa, setFilterEstado, onAbrirSelector, onVer, onEntregar, onEditar, onRevertir, onEliminar, onExportarPeriodo, onPDFRespaldos, onNuevo }) {
-  const hayFiltros = filterPatente || filterEmpresa || filterEstado !== 'todos';
+function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, filterPatente, filterEmpresa, filterEstado, filterServicio, filterEquipamiento, setFilterPatente, setFilterEmpresa, setFilterEstado, setFilterServicio, setFilterEquipamiento, onAbrirSelector, onVer, onEntregar, onEditar, onRevertir, onEliminar, onExportarPeriodo, onPDFRespaldos, onNuevo }) {
+  const hayFiltros = filterPatente || filterEmpresa || filterEstado !== 'todos' || filterServicio || filterEquipamiento;
 
   return (
     <div className="space-y-5">
@@ -1377,7 +1409,7 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input type="text" value={filterPatente} onChange={e => setFilterPatente(e.target.value)} placeholder="Buscar por patente..." className="input pl-9" />
@@ -1391,9 +1423,17 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
             <option value="en_proceso">En proceso</option>
             <option value="entregado">Entregados</option>
           </select>
+          <select value={filterServicio} onChange={e => setFilterServicio(e.target.value)} className="input">
+            <option value="">Todos los servicios</option>
+            {SERVICIOS_CATALOGO.map(s => <option key={s.nombre} value={s.nombre}>{s.nombre}</option>)}
+          </select>
+          <select value={filterEquipamiento} onChange={e => setFilterEquipamiento(e.target.value)} className="input">
+            <option value="">Todo el equipamiento</option>
+            {EQUIPAMIENTO_CATALOGO.map(eq => <option key={eq.nombre} value={eq.nombre}>{eq.nombre}</option>)}
+          </select>
         </div>
         {hayFiltros && (
-          <button onClick={() => { setFilterPatente(''); setFilterEmpresa(''); setFilterEstado('todos'); }} className="mt-3 text-xs text-blue-700 hover:text-blue-900 flex items-center gap-1">
+          <button onClick={() => { setFilterPatente(''); setFilterEmpresa(''); setFilterEstado('todos'); setFilterServicio(''); setFilterEquipamiento(''); }} className="mt-3 text-xs text-blue-700 hover:text-blue-900 flex items-center gap-1">
             <X size={12} /> Limpiar filtros
           </button>
         )}
@@ -1429,7 +1469,7 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
                     <td className="px-4 py-3 font-bold text-blue-700">#{i.n_control}</td>
                     <td className="px-4 py-3 text-slate-900">{i.nombre_empresa}</td>
                     <td className="px-4 py-3 text-slate-600">{i.marca} {i.modelo}</td>
-                    <td className="px-4 py-3 font-mono text-slate-700">{i.patente}</td>
+                    <td className="px-4 py-3 font-mono text-slate-700">{formatPatente(i.patente)}</td>
                     <td className="px-4 py-3 text-slate-600">{new Date(i.fecha_creacion).toLocaleDateString('es-CL')}</td>
                     <td className="px-4 py-3"><EstadoBadge estado={i.estado} /></td>
                     <td className="px-4 py-3 text-right">
@@ -1454,7 +1494,7 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
                   <div>
                     <p className="text-xs text-slate-500">N°{i.n_control} · {new Date(i.fecha_creacion).toLocaleDateString('es-CL')}</p>
                     <p className="font-bold text-slate-900">{i.nombre_empresa}</p>
-                    <p className="text-sm text-slate-600">{i.marca} {i.modelo} · <span className="font-mono">{i.patente}</span></p>
+                    <p className="text-sm text-slate-600">{i.marca} {i.modelo} · <span className="font-mono">{formatPatente(i.patente)}</span></p>
                   </div>
                   <EstadoBadge estado={i.estado} />
                 </div>
@@ -1504,7 +1544,7 @@ function DetalleView({ ingreso, onVolver, onPDF, onEntregar, onEditar, onReverti
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <DetalleCard title="Datos del vehículo" icon={<Car size={18} />}>
           <DetalleRow label="Empresa" value={ingreso.nombre_empresa} />
-          <DetalleRow label="Patente" value={ingreso.patente} />
+          <DetalleRow label="Patente" value={formatPatente(ingreso.patente)} />
           <DetalleRow label="Tipo" value={ingreso.tipo_vehiculo} />
           <DetalleRow label="Marca" value={ingreso.marca} />
           <DetalleRow label="Modelo" value={ingreso.modelo} />
@@ -1693,7 +1733,7 @@ function generarBloqueReporteIndividual(i, pageBreakAntes = false) {
   <div class="n-control">N°${i.n_control}</div>
   <div class="section-title">DATOS DE INGRESO</div>
   <table>
-    <tr><td class="label">NOMBRE EMPRESA:</td><td>${i.nombre_empresa || ''}</td><td class="label">N° PATENTE:</td><td>${i.patente || ''}</td></tr>
+    <tr><td class="label">NOMBRE EMPRESA:</td><td>${i.nombre_empresa || ''}</td><td class="label">N° PATENTE:</td><td>${formatPatente(i.patente)}</td></tr>
     <tr><td class="label">TIPO DE VEHICULO:</td><td>${i.tipo_vehiculo || ''}</td><td class="label">MODELO VEHICULO:</td><td>${i.modelo || ''}</td></tr>
     <tr><td class="label">MARCA DE VEHICULO:</td><td>${i.marca || ''}</td><td class="label">KILOMETRAJE:</td><td>${i.kilometraje || ''}</td></tr>
   </table>
@@ -1765,7 +1805,7 @@ body { font-family: Arial, sans-serif; font-size: 11px; color: #1e293b; margin: 
 .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #1e40af; padding-bottom: 8px; margin-bottom: 8px; }
 .header-title { font-size: 14px; font-weight: bold; letter-spacing: 0.3px; }
 .logo { text-align: right; font-size: 13px; font-weight: bold; color: #1e40af; line-height: 1.2; }
-.n-control { text-align: right; font-size: 13px; font-weight: bold; color: #dc2626; margin-bottom: 6px; }
+.n-control { text-align: center; font-size: 24px; font-weight: bold; color: #dc2626; letter-spacing: 0.5px; margin: 6px 0 10px; }
 .section-title { background: #1e40af; color: #fff; font-weight: bold; font-size: 11px; padding: 4px 8px; margin-top: 8px; text-transform: uppercase; letter-spacing: 0.3px; }
 table { width: 100%; border-collapse: collapse; margin-bottom: 2px; }
 td { border: 1px solid #cbd5e1; padding: 4px 6px; vertical-align: top; font-size: 10px; }
@@ -1773,8 +1813,8 @@ td.label { background: #f1f5f9; font-weight: bold; font-size: 9px; white-space: 
 .checkbox-table > tbody > tr > td { border: 1px solid #cbd5e1; padding: 0; }
 .checkbox-table table { margin: 0; }
 .checkbox-table table td { border: 0; border-bottom: 1px solid #e2e8f0; padding: 3px 6px; }
-.firma-box { height: 70px; text-align: center; vertical-align: middle; }
-.firma-img { max-height: 62px; max-width: 95%; object-fit: contain; }
+.firma-box { height: 110px; text-align: center; vertical-align: middle; }
+.firma-img { max-height: 100px; max-width: 95%; object-fit: contain; }
 .footer { margin-top: 10px; padding-top: 6px; border-top: 1px solid #cbd5e1; font-size: 8px; color: #64748b; text-align: center; }
 .respaldo-cover { text-align: center; padding: 24px 0; border-bottom: 2px solid #1e40af; margin-bottom: 12px; }
 .respaldo-cover h1 { font-size: 18px; color: #1e40af; margin: 0 0 6px; }
@@ -1797,8 +1837,12 @@ ${generarBloqueReporteIndividual(ingreso)}
 </html>`;
 }
 
-function generarHTMLRespaldosMes(ingresosList, periodoLabel, filterEmpresa) {
-  const filtroTexto = filterEmpresa ? ` · Empresa: ${filterEmpresa}` : '';
+function generarHTMLRespaldosMes(ingresosList, periodoLabel, filterEmpresa, filterServicio, filterEquipamiento) {
+  const lineasFiltro = [];
+  if (filterEmpresa) lineasFiltro.push(`Empresa: ${filterEmpresa}`);
+  if (filterServicio) lineasFiltro.push(`Servicio: ${filterServicio}`);
+  if (filterEquipamiento) lineasFiltro.push(`Equipamiento: ${filterEquipamiento}`);
+  const filtroTexto = lineasFiltro.length ? ` · ${lineasFiltro.join(' · ')}` : '';
   const cover = `
 <div class="respaldo-cover">
   <h1>RESPALDOS DE INGRESOS</h1>
