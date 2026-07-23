@@ -138,7 +138,7 @@ function dbToApp(row) {
     cliente_entrega_fecha: row.cliente_entrega_fecha || '',
     cliente_entrega_hora: row.cliente_entrega_hora ? row.cliente_entrega_hora.slice(0, 5) : '',
     cliente_entrega_persona: row.cliente_entrega_persona || '',
-    cliente_entrega_firma: row.cliente_entrega_firma || '',
+    cliente_entrega_firma: 'cliente_entrega_firma' in row ? (row.cliente_entrega_firma || '') : undefined,
     cliente_entrega_sin_firma: row.cliente_entrega_sin_firma || false,
     cliente_entrega_motivo_sin_firma: row.cliente_entrega_motivo_sin_firma || '',
     luandi_recibe_fecha: row.luandi_recibe_fecha || '',
@@ -150,7 +150,8 @@ function dbToApp(row) {
     cliente_recibe_fecha: row.cliente_recibe_fecha || '',
     cliente_recibe_hora: row.cliente_recibe_hora ? row.cliente_recibe_hora.slice(0, 5) : '',
     cliente_recibe_persona: row.cliente_recibe_persona || '',
-    cliente_recibe_firma: row.cliente_recibe_firma || '',
+    cliente_recibe_firma: 'cliente_recibe_firma' in row ? (row.cliente_recibe_firma || '') : undefined,
+    firmas_cargadas: 'cliente_entrega_firma' in row,
     observaciones: row.observaciones || '',
     observaciones_entrega: row.observaciones_entrega || '',
     estado: row.estado || 'en_proceso',
@@ -160,6 +161,12 @@ function dbToApp(row) {
 
 function appToDb(data) {
   const clean = { ...data };
+  // Campo interno de la app, no existe en la base de datos
+  delete clean.firmas_cargadas;
+  // SEGURIDAD: si una firma no fue cargada (undefined), NO se envía,
+  // para no sobrescribir con vacío una firma ya registrada.
+  if (clean.cliente_entrega_firma === undefined) delete clean.cliente_entrega_firma;
+  if (clean.cliente_recibe_firma === undefined) delete clean.cliente_recibe_firma;
   const dateFields = ['cliente_entrega_fecha', 'luandi_recibe_fecha', 'luandi_entrega_fecha', 'cliente_recibe_fecha'];
   const timeFields = ['cliente_entrega_hora', 'luandi_recibe_hora', 'luandi_entrega_hora', 'cliente_recibe_hora'];
   [...dateFields, ...timeFields].forEach(f => {
@@ -444,9 +451,25 @@ export default function LuandiApp() {
   const [alertModal, setAlertModal] = useState(null);
   const [confirmModal, setConfirmModal] = useState(null);
 
+  // Todas las columnas EXCEPTO las firmas (que son imágenes pesadas).
+  // Traerlas todas juntas hacía que la respuesta superara el límite de Supabase (error 500).
+  const COLUMNAS_LISTA = [
+    'id', 'n_control', 'nombre_empresa', 'patente', 'tipo_vehiculo', 'marca', 'modelo', 'kilometraje',
+    'servicios', 'servicios_otros', 'equipamiento', 'equipamiento_otros',
+    'cantidad_adblue_litros', 'cantidad_cunas', 'cantidad_piola_cunas', 'cantidad_porta_cunas',
+    'cantidad_checkpoint', 'cantidad_focos_mineros', 'cantidad_mallas_elasticas',
+    'cantidad_cinta_metros', 'cantidad_focos_traseros', 'cantidad_faroles_delanteros',
+    'cliente_entrega_fecha', 'cliente_entrega_hora', 'cliente_entrega_persona',
+    'cliente_entrega_sin_firma', 'cliente_entrega_motivo_sin_firma',
+    'luandi_recibe_fecha', 'luandi_recibe_hora', 'luandi_recibe_persona',
+    'luandi_entrega_fecha', 'luandi_entrega_hora', 'luandi_entrega_persona',
+    'cliente_recibe_fecha', 'cliente_recibe_hora', 'cliente_recibe_persona',
+    'observaciones', 'observaciones_entrega', 'estado', 'fecha_creacion'
+  ].join(',');
+
   const cargarIngresos = async () => {
     try {
-      const { data, error } = await supabase.from('ingresos').select('*').order('fecha_creacion', { ascending: false });
+      const { data, error } = await supabase.from('ingresos').select(COLUMNAS_LISTA).order('fecha_creacion', { ascending: false }).limit(5000);
       if (error) throw error;
       setIngresos((data || []).map(dbToApp));
       setConectado(true);
@@ -457,6 +480,57 @@ export default function LuandiApp() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Trae las firmas de UN ingreso (solo cuando se necesitan: ver, editar, entregar, PDF)
+  const cargarFirmas = async (ingreso) => {
+    if (!ingreso) return ingreso;
+    if (ingreso.firmas_cargadas) return ingreso;
+    try {
+      const { data, error } = await supabase
+        .from('ingresos')
+        .select('cliente_entrega_firma,cliente_recibe_firma')
+        .eq('id', ingreso.id)
+        .single();
+      if (error) throw error;
+      return {
+        ...ingreso,
+        cliente_entrega_firma: data.cliente_entrega_firma || '',
+        cliente_recibe_firma: data.cliente_recibe_firma || '',
+        firmas_cargadas: true
+      };
+    } catch (e) {
+      console.error('Error cargando firmas:', e);
+      showToast('No se pudieron cargar las firmas de este registro', 'error');
+      return ingreso;
+    }
+  };
+
+  // Trae las firmas de VARIOS ingresos, en lotes, para el PDF de respaldos
+  const cargarFirmasLote = async (lista) => {
+    const pendientes = lista.filter(i => !i.firmas_cargadas);
+    if (pendientes.length === 0) return lista;
+    const mapa = new Map();
+    const TAM_LOTE = 40;
+    for (let k = 0; k < pendientes.length; k += TAM_LOTE) {
+      const ids = pendientes.slice(k, k + TAM_LOTE).map(i => i.id);
+      const { data, error } = await supabase
+        .from('ingresos')
+        .select('id,cliente_entrega_firma,cliente_recibe_firma')
+        .in('id', ids);
+      if (error) throw error;
+      (data || []).forEach(r => mapa.set(r.id, r));
+    }
+    return lista.map(i => {
+      const r = mapa.get(i.id);
+      if (!r) return i;
+      return {
+        ...i,
+        cliente_entrega_firma: r.cliente_entrega_firma || '',
+        cliente_recibe_firma: r.cliente_recibe_firma || '',
+        firmas_cargadas: true
+      };
+    });
   };
 
   useEffect(() => {
@@ -678,17 +752,27 @@ export default function LuandiApp() {
     setTimeout(() => win.print(), 500);
   };
 
-  const generarPDFRespaldosFiltrados = () => {
+  const generarPDFRespaldosFiltrados = async () => {
     if (ingresosFiltrados.length === 0) {
       showToast('No hay registros con los filtros aplicados', 'info');
       return;
     }
     const win = window.open('', '_blank');
     if (!win) { showToast('Permita ventanas emergentes para descargar el PDF', 'error'); return; }
-    const ordenados = [...ingresosFiltrados].sort((a, b) => a.n_control - b.n_control);
-    win.document.write(generarHTMLRespaldosMes(ordenados, getPeriodoLabel(periodoSeleccionado), filterEmpresa, filterServicio, filterEquipamiento));
-    win.document.close();
-    setTimeout(() => win.print(), 800);
+    win.document.write('<p style="font-family:Arial;padding:20px">Preparando respaldos, espere un momento...</p>');
+    try {
+      showToast('Cargando firmas de los registros...', 'info');
+      const conFirmas = await cargarFirmasLote(ingresosFiltrados);
+      const ordenados = [...conFirmas].sort((a, b) => a.n_control - b.n_control);
+      win.document.open();
+      win.document.write(generarHTMLRespaldosMes(ordenados, getPeriodoLabel(periodoSeleccionado), filterEmpresa, filterServicio, filterEquipamiento));
+      win.document.close();
+      setTimeout(() => win.print(), 800);
+    } catch (e) {
+      console.error('Error preparando respaldos:', e);
+      win.close();
+      showToast('Error al preparar los respaldos: ' + e.message, 'error');
+    }
   };
 
   if (loading) {
@@ -777,9 +861,9 @@ export default function LuandiApp() {
             setFilterServicio={setFilterServicio}
             setFilterEquipamiento={setFilterEquipamiento}
             onAbrirSelector={() => setMostrarSelectorPeriodo(true)}
-            onVer={(i) => { setSelectedIngreso(i); setView('detalle'); }}
-            onEntregar={(i) => { setSelectedIngreso(i); setView('entrega'); }}
-            onEditar={(i) => { setSelectedIngreso(i); setView('nuevo'); }}
+            onVer={async (i) => { setSelectedIngreso(await cargarFirmas(i)); setView('detalle'); }}
+            onEntregar={async (i) => { setSelectedIngreso(await cargarFirmas(i)); setView('entrega'); }}
+            onEditar={async (i) => { setSelectedIngreso(await cargarFirmas(i)); setView('nuevo'); }}
             onRevertir={revertirEstado}
             onEliminar={eliminarIngreso}
             onExportarPeriodo={exportarExcelFiltrado}
@@ -788,7 +872,7 @@ export default function LuandiApp() {
           />
         )}
         {view === 'detalle' && selectedIngreso && (
-          <DetalleView ingreso={selectedIngreso} onVolver={() => setView('historial')} onPDF={() => generarPDF(selectedIngreso)} onEntregar={() => setView('entrega')} onEditar={() => setView('nuevo')} onRevertir={() => revertirEstado(selectedIngreso)} />
+          <DetalleView ingreso={selectedIngreso} onVolver={() => setView('historial')} onPDF={async () => { const c = await cargarFirmas(selectedIngreso); setSelectedIngreso(c); generarPDF(c); }} onEntregar={async () => { setSelectedIngreso(await cargarFirmas(selectedIngreso)); setView('entrega'); }} onEditar={async () => { setSelectedIngreso(await cargarFirmas(selectedIngreso)); setView('nuevo'); }} onRevertir={() => revertirEstado(selectedIngreso)} />
         )}
         {view === 'entrega' && selectedIngreso && (
           <FormularioEntrega ingreso={selectedIngreso} onGuardar={cerrarEntrega} onCancelar={() => setView('historial')} saving={saving} showAlert={showAlert} />
@@ -940,6 +1024,7 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
     cliente_entrega_hora: new Date().toTimeString().slice(0, 5),
     cliente_entrega_persona: '', cliente_entrega_firma: '',
     cliente_entrega_sin_firma: false, cliente_entrega_motivo_sin_firma: '',
+    firmas_cargadas: true,
     luandi_recibe_fecha: new Date().toISOString().split('T')[0],
     luandi_recibe_hora: new Date().toTimeString().slice(0, 5),
     luandi_recibe_persona: '', observaciones: ''
