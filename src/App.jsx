@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock, Loader2, Cloud, CloudOff, FolderOpen, AlertTriangle, Lock, RotateCcw } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, ChevronDown, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock, Loader2, Cloud, CloudOff, FolderOpen, AlertTriangle, Lock, RotateCcw } from 'lucide-react';
 import { supabase } from './supabase';
 
 // ====== CATÁLOGOS ======
@@ -405,6 +405,117 @@ function SelectConOtro({ label, valor, opciones, onChange, placeholder, uppercas
   );
 }
 
+// ====== FILTRO DE EMPRESAS ======
+// "Catálogo oficial": el catálogo, pero las empresas que comparten primera palabra
+// (ej: COMTECSA C-132 / PEM 612 / SITES) se agrupan en una sola opción "COMTECSA".
+// "Variantes y Otros": cada variante específica + "Otro" (lo que no calza con ninguna oficial).
+const OTRA_EMPRESA = '__otro__';
+const normalizarEmpresa = (s) => (s || '').trim().toUpperCase();
+
+// "COMTECSA C-132" pertenece a "COMTECSA"; "CBSX" no pertenece a "CBS"
+const perteneceA = (empresa, base) => {
+  const e = normalizarEmpresa(empresa);
+  return e === base || (e.startsWith(base) && !/[A-Z0-9ÁÉÍÓÚÑ]/.test(e.charAt(base.length)));
+};
+
+const FAMILIAS_EMPRESA = (() => {
+  const conteo = {};
+  EMPRESAS_CATALOGO.forEach(e => { const p = e.split(' ')[0]; conteo[p] = (conteo[p] || 0) + 1; });
+  return Object.keys(conteo).filter(p => conteo[p] > 1);
+})();
+
+const EMPRESAS_OFICIALES = [...new Set(EMPRESAS_CATALOGO.map(e => FAMILIAS_EMPRESA.find(f => perteneceA(e, f)) || e))];
+
+function construirOpcionesEmpresa(ingresos) {
+  const variantes = new Set();
+  const agregar = (nombre) => {
+    const n = normalizarEmpresa(nombre);
+    if (!n || EMPRESAS_OFICIALES.includes(n)) return;
+    if (EMPRESAS_OFICIALES.some(b => perteneceA(n, b))) variantes.add(n);
+  };
+  EMPRESAS_CATALOGO.forEach(agregar);
+  ingresos.forEach(i => agregar(i.nombre_empresa));
+  return [
+    ...EMPRESAS_OFICIALES.map(e => ({ value: e, label: e, group: 'Catálogo oficial' })),
+    ...[...variantes].sort().map(v => ({ value: v, label: v, group: 'Variantes y Otros' })),
+    { value: OTRA_EMPRESA, label: 'Otro', group: 'Variantes y Otros' }
+  ];
+}
+
+function empresaCoincide(empresa, seleccion) {
+  if (seleccion === OTRA_EMPRESA) return !EMPRESAS_OFICIALES.some(b => perteneceA(empresa, b));
+  if (EMPRESAS_OFICIALES.includes(seleccion)) return perteneceA(empresa, seleccion);
+  return normalizarEmpresa(empresa) === seleccion;
+}
+
+const etiquetaEmpresa = (v) => v === OTRA_EMPRESA ? 'Otro' : v;
+
+const ESTADOS_OPCIONES = [
+  { value: 'en_proceso', label: 'En proceso' },
+  { value: 'entregado', label: 'Entregado' }
+];
+
+// Dropdown con checkboxes. `opciones`: [{ value, label, group? }]. `onChange` recibe un updater (prev => next).
+function MultiSelect({ icon, label, placeholder, opciones, seleccion, onChange, femenino = false }) {
+  const [abierto, setAbierto] = useState(false);
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!abierto) return;
+    const cerrarFuera = (e) => { if (ref.current && !ref.current.contains(e.target)) setAbierto(false); };
+    const cerrarEsc = (e) => { if (e.key === 'Escape') setAbierto(false); };
+    document.addEventListener('mousedown', cerrarFuera);
+    document.addEventListener('touchstart', cerrarFuera);
+    document.addEventListener('keydown', cerrarEsc);
+    return () => {
+      document.removeEventListener('mousedown', cerrarFuera);
+      document.removeEventListener('touchstart', cerrarFuera);
+      document.removeEventListener('keydown', cerrarEsc);
+    };
+  }, [abierto]);
+
+  const toggle = (v) => onChange(prev => prev.includes(v) ? prev.filter(x => x !== v) : [...prev, v]);
+
+  let texto = placeholder;
+  if (seleccion.length === 1) texto = (opciones.find(o => o.value === seleccion[0]) || {}).label || seleccion[0];
+  else if (seleccion.length > 1) texto = `${label} (${seleccion.length} ${femenino ? 'seleccionadas' : 'seleccionados'})`;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setAbierto(a => !a)}
+        className={`input inline-flex items-center gap-2 text-left cursor-pointer ${seleccion.length ? 'border-blue-400 bg-blue-50' : ''}`}
+      >
+        {icon && <span className="text-slate-400 flex-shrink-0">{icon}</span>}
+        <span className={`flex-1 truncate ${seleccion.length ? 'text-blue-900 font-medium' : 'text-slate-700'}`}>{texto}</span>
+        <ChevronDown size={16} className={`text-slate-400 flex-shrink-0 transition-transform ${abierto ? 'rotate-180' : ''}`} />
+      </button>
+      {abierto && (
+        <div className="absolute left-0 right-0 z-30 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg">
+          <div className="max-h-72 overflow-y-auto py-1">
+            {opciones.map((o, idx) => (
+              <React.Fragment key={o.value}>
+                {o.group && o.group !== (opciones[idx - 1] || {}).group && (
+                  <p className="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 border-t first:border-t-0 border-slate-100">{o.group}</p>
+                )}
+                <label className="flex items-center gap-2.5 px-3 py-2.5 sm:py-2 cursor-pointer hover:bg-slate-50">
+                  <input type="checkbox" checked={seleccion.includes(o.value)} onChange={() => toggle(o.value)} className="w-4 h-4 rounded text-blue-600 flex-shrink-0" />
+                  <span className="text-sm text-slate-700">{o.label}</span>
+                </label>
+              </React.Fragment>
+            ))}
+          </div>
+          <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-slate-200 bg-slate-50 rounded-b-lg">
+            <button type="button" onClick={() => onChange(() => [])} className="text-xs text-blue-700 hover:text-blue-900 cursor-pointer disabled:text-slate-400" disabled={!seleccion.length}>Limpiar</button>
+            <button type="button" onClick={() => setAbierto(false)} className="inline-flex items-center px-3 py-1.5 bg-blue-700 hover:bg-blue-800 text-white rounded-md text-xs font-medium cursor-pointer">Listo</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Item de servicio/equipamiento con cantidad opcional inline
 function CheckItemConCantidad({ item, marcado, cantidad, onToggle, onChangeCantidad }) {
   return (
@@ -441,10 +552,12 @@ export default function LuandiApp() {
   const [conectado, setConectado] = useState(true);
   const [selectedIngreso, setSelectedIngreso] = useState(null);
   const [filterPatente, setFilterPatente] = useState('');
-  const [filterEmpresa, setFilterEmpresa] = useState('');
-  const [filterEstado, setFilterEstado] = useState('todos');
-  const [filterServicio, setFilterServicio] = useState('');
-  const [filterEquipamiento, setFilterEquipamiento] = useState('');
+  // Filtros multi-select: arreglo vacío = sin filtro
+  const [filterEmpresas, setFilterEmpresas] = useState([]);
+  const [filterTipos, setFilterTipos] = useState([]);
+  const [filterEstados, setFilterEstados] = useState([]);
+  const [filterServicios, setFilterServicios] = useState([]);
+  const [filterEquipamientos, setFilterEquipamientos] = useState([]);
   const [periodoSeleccionado, setPeriodoSeleccionado] = useState(getPeriodoKey(new Date()));
   const [mostrarSelectorPeriodo, setMostrarSelectorPeriodo] = useState(false);
   const [toast, setToast] = useState(null);
@@ -655,22 +768,33 @@ export default function LuandiApp() {
 
   const ingresosDelPeriodo = ingresos.filter(i => getPeriodoKey(i.fecha_creacion) === periodoSeleccionado);
 
+  const opcionesEmpresa = useMemo(() => construirOpcionesEmpresa(ingresos), [ingresos]);
+
+  // Dentro de un filtro = OR; entre filtros = AND
   const ingresosFiltrados = ingresosDelPeriodo.filter(i => {
     const matchPatente = !filterPatente || limpiarPatente(i.patente).includes(limpiarPatente(filterPatente));
-    const matchEmpresa = !filterEmpresa || (i.nombre_empresa || '').toLowerCase().includes(filterEmpresa.toLowerCase());
-    const matchEstado = filterEstado === 'todos' || i.estado === filterEstado;
-    const matchServicio = !filterServicio || (i.servicios || []).includes(filterServicio);
-    const matchEquipamiento = !filterEquipamiento || (i.equipamiento || []).includes(filterEquipamiento);
-    return matchPatente && matchEmpresa && matchEstado && matchServicio && matchEquipamiento;
+    const matchEmpresa = !filterEmpresas.length || filterEmpresas.some(s => empresaCoincide(i.nombre_empresa, s));
+    const matchTipo = !filterTipos.length || filterTipos.includes(i.tipo_vehiculo);
+    const matchEstado = !filterEstados.length || filterEstados.includes(i.estado);
+    const matchServicio = !filterServicios.length || filterServicios.some(s => (i.servicios || []).includes(s));
+    const matchEquipamiento = !filterEquipamientos.length || filterEquipamientos.some(s => (i.equipamiento || []).includes(s));
+    return matchPatente && matchEmpresa && matchTipo && matchEstado && matchServicio && matchEquipamiento;
   });
+
+  // 1-2 seleccionados → sus nombres; 3+ → resumen "3_empresas"
+  const parteArchivo = (valores, etiqueta, sustantivo, prefijo = '') => {
+    const texto = valores.length <= 2 ? valores.map(etiqueta).join('_') : `${valores.length}_${sustantivo}`;
+    return prefijo + texto.replace(/[^a-zA-Z0-9]/g, '_');
+  };
 
   const filtrosActivos = () => {
     const partes = [];
-    if (filterEmpresa) partes.push(filterEmpresa.replace(/[^a-zA-Z0-9]/g, '_'));
+    if (filterEmpresas.length) partes.push(parteArchivo(filterEmpresas, etiquetaEmpresa, 'empresas'));
+    if (filterTipos.length) partes.push(parteArchivo(filterTipos, t => t, 'tipos'));
     if (filterPatente) partes.push(filterPatente.replace(/[^a-zA-Z0-9]/g, '_'));
-    if (filterEstado !== 'todos') partes.push(filterEstado === 'entregado' ? 'Entregados' : 'EnProceso');
-    if (filterServicio) partes.push('Serv_' + filterServicio.replace(/[^a-zA-Z0-9]/g, '_'));
-    if (filterEquipamiento) partes.push('Equip_' + filterEquipamiento.replace(/[^a-zA-Z0-9]/g, '_'));
+    if (filterEstados.length === 1) partes.push(filterEstados[0] === 'entregado' ? 'Entregados' : 'EnProceso');
+    if (filterServicios.length) partes.push(parteArchivo(filterServicios, s => s, 'servicios', 'Serv_'));
+    if (filterEquipamientos.length) partes.push(parteArchivo(filterEquipamientos, s => s, 'equipamientos', 'Equip_'));
     return partes.join('_');
   };
 
@@ -765,7 +889,9 @@ export default function LuandiApp() {
       const conFirmas = await cargarFirmasLote(ingresosFiltrados);
       const ordenados = [...conFirmas].sort((a, b) => a.n_control - b.n_control);
       win.document.open();
-      win.document.write(generarHTMLRespaldosMes(ordenados, getPeriodoLabel(periodoSeleccionado), filterEmpresa, filterServicio, filterEquipamiento));
+      win.document.write(generarHTMLRespaldosMes(ordenados, getPeriodoLabel(periodoSeleccionado), {
+        empresas: filterEmpresas.map(etiquetaEmpresa), tipos: filterTipos, servicios: filterServicios, equipamientos: filterEquipamientos
+      }));
       win.document.close();
       setTimeout(() => win.print(), 800);
     } catch (e) {
@@ -851,15 +977,18 @@ export default function LuandiApp() {
             periodoLabel={getPeriodoLabel(periodoSeleccionado)}
             esMesActual={periodoSeleccionado === getPeriodoKey(new Date())}
             filterPatente={filterPatente}
-            filterEmpresa={filterEmpresa}
-            filterEstado={filterEstado}
-            filterServicio={filterServicio}
-            filterEquipamiento={filterEquipamiento}
+            opcionesEmpresa={opcionesEmpresa}
+            filterEmpresas={filterEmpresas}
+            filterTipos={filterTipos}
+            filterEstados={filterEstados}
+            filterServicios={filterServicios}
+            filterEquipamientos={filterEquipamientos}
             setFilterPatente={setFilterPatente}
-            setFilterEmpresa={setFilterEmpresa}
-            setFilterEstado={setFilterEstado}
-            setFilterServicio={setFilterServicio}
-            setFilterEquipamiento={setFilterEquipamiento}
+            setFilterEmpresas={setFilterEmpresas}
+            setFilterTipos={setFilterTipos}
+            setFilterEstados={setFilterEstados}
+            setFilterServicios={setFilterServicios}
+            setFilterEquipamientos={setFilterEquipamientos}
             onAbrirSelector={() => setMostrarSelectorPeriodo(true)}
             onVer={async (i) => { setSelectedIngreso(await cargarFirmas(i)); setView('detalle'); }}
             onEntregar={async (i) => { setSelectedIngreso(await cargarFirmas(i)); setView('entrega'); }}
@@ -1453,8 +1582,8 @@ function FormularioEntrega({ ingreso, onGuardar, onCancelar, saving, showAlert }
   );
 }
 
-function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, filterPatente, filterEmpresa, filterEstado, filterServicio, filterEquipamiento, setFilterPatente, setFilterEmpresa, setFilterEstado, setFilterServicio, setFilterEquipamiento, onAbrirSelector, onVer, onEntregar, onEditar, onRevertir, onEliminar, onExportarPeriodo, onPDFRespaldos, onNuevo }) {
-  const hayFiltros = filterPatente || filterEmpresa || filterEstado !== 'todos' || filterServicio || filterEquipamiento;
+function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, opcionesEmpresa, filterPatente, filterEmpresas, filterTipos, filterEstados, filterServicios, filterEquipamientos, setFilterPatente, setFilterEmpresas, setFilterTipos, setFilterEstados, setFilterServicios, setFilterEquipamientos, onAbrirSelector, onVer, onEntregar, onEditar, onRevertir, onEliminar, onExportarPeriodo, onPDFRespaldos, onNuevo }) {
+  const hayFiltros = filterPatente || filterEmpresas.length || filterTipos.length || filterEstados.length || filterServicios.length || filterEquipamientos.length;
 
   return (
     <div className="space-y-5">
@@ -1499,26 +1628,19 @@ function HistorialView({ ingresos, totalDelPeriodo, periodoLabel, esMesActual, f
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input type="text" value={filterPatente} onChange={e => setFilterPatente(e.target.value)} placeholder="Buscar por patente..." className="input pl-9" />
           </div>
-          <div className="relative">
-            <Building2 size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input type="text" value={filterEmpresa} onChange={e => setFilterEmpresa(e.target.value)} placeholder="Buscar por empresa..." className="input pl-9" />
-          </div>
-          <select value={filterEstado} onChange={e => setFilterEstado(e.target.value)} className="input">
-            <option value="todos">Todos los estados</option>
-            <option value="en_proceso">En proceso</option>
-            <option value="entregado">Entregados</option>
-          </select>
-          <select value={filterServicio} onChange={e => setFilterServicio(e.target.value)} className="input">
-            <option value="">Todos los servicios</option>
-            {SERVICIOS_CATALOGO.map(s => <option key={s.nombre} value={s.nombre}>{s.nombre}</option>)}
-          </select>
-          <select value={filterEquipamiento} onChange={e => setFilterEquipamiento(e.target.value)} className="input">
-            <option value="">Todo el equipamiento</option>
-            {EQUIPAMIENTO_CATALOGO.map(eq => <option key={eq.nombre} value={eq.nombre}>{eq.nombre}</option>)}
-          </select>
+          <MultiSelect icon={<Building2 size={16} />} label="Empresa" placeholder="Todas las empresas" femenino
+            opciones={opcionesEmpresa} seleccion={filterEmpresas} onChange={setFilterEmpresas} />
+          <MultiSelect icon={<Car size={16} />} label="Tipo" placeholder="Todos los tipos de vehículo"
+            opciones={TIPOS_VEHICULO.map(t => ({ value: t, label: t }))} seleccion={filterTipos} onChange={setFilterTipos} />
+          <MultiSelect icon={<Clock size={16} />} label="Estado" placeholder="Todos los estados"
+            opciones={ESTADOS_OPCIONES} seleccion={filterEstados} onChange={setFilterEstados} />
+          <MultiSelect icon={<Wrench size={16} />} label="Servicios" placeholder="Todos los servicios"
+            opciones={SERVICIOS_CATALOGO.map(s => ({ value: s.nombre, label: s.nombre }))} seleccion={filterServicios} onChange={setFilterServicios} />
+          <MultiSelect icon={<Wrench size={16} />} label="Equipamiento" placeholder="Todo el equipamiento"
+            opciones={EQUIPAMIENTO_CATALOGO.map(eq => ({ value: eq.nombre, label: eq.nombre }))} seleccion={filterEquipamientos} onChange={setFilterEquipamientos} />
         </div>
         {hayFiltros && (
-          <button onClick={() => { setFilterPatente(''); setFilterEmpresa(''); setFilterEstado('todos'); setFilterServicio(''); setFilterEquipamiento(''); }} className="mt-3 text-xs text-blue-700 hover:text-blue-900 flex items-center gap-1">
+          <button onClick={() => { setFilterPatente(''); setFilterEmpresas([]); setFilterTipos([]); setFilterEstados([]); setFilterServicios([]); setFilterEquipamientos([]); }} className="mt-3 text-xs text-blue-700 hover:text-blue-900 flex items-center gap-1">
             <X size={12} /> Limpiar filtros
           </button>
         )}
@@ -1922,11 +2044,13 @@ ${generarBloqueReporteIndividual(ingreso)}
 </html>`;
 }
 
-function generarHTMLRespaldosMes(ingresosList, periodoLabel, filterEmpresa, filterServicio, filterEquipamiento) {
+function generarHTMLRespaldosMes(ingresosList, periodoLabel, filtros = {}) {
+  const { empresas = [], tipos = [], servicios = [], equipamientos = [] } = filtros;
   const lineasFiltro = [];
-  if (filterEmpresa) lineasFiltro.push(`Empresa: ${filterEmpresa}`);
-  if (filterServicio) lineasFiltro.push(`Servicio: ${filterServicio}`);
-  if (filterEquipamiento) lineasFiltro.push(`Equipamiento: ${filterEquipamiento}`);
+  if (empresas.length) lineasFiltro.push(`Empresa: ${empresas.join(', ')}`);
+  if (tipos.length) lineasFiltro.push(`Tipo: ${tipos.join(', ')}`);
+  if (servicios.length) lineasFiltro.push(`Servicio: ${servicios.join(', ')}`);
+  if (equipamientos.length) lineasFiltro.push(`Equipamiento: ${equipamientos.join(', ')}`);
   const filtroTexto = lineasFiltro.length ? ` · ${lineasFiltro.join(' · ')}` : '';
   const cover = `
 <div class="respaldo-cover">

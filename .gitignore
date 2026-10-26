@@ -1,0 +1,11 @@
+# Credenciales (NUNCA subir a GitHub)
+.env
+.env.local
+.env.*.local
+
+# Dependencias y build
+node_modules/
+dist/
+
+# macOS
+.DS_Store
