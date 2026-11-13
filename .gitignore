@@ -9,3 +9,6 @@ dist/
 
 # macOS
 .DS_Store
+
+# Lista de precios (no subir a GitHub)
+listado precio por cliente.xlsx

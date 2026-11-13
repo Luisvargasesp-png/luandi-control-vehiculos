@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, ChevronDown, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock, Loader2, Cloud, CloudOff, FolderOpen, AlertTriangle, Lock, RotateCcw } from 'lucide-react';
+import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, ChevronDown, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock, Loader2, Cloud, CloudOff, FolderOpen, AlertTriangle, Lock, RotateCcw, Receipt, DollarSign, History, LogOut, Copy, KeyRound } from 'lucide-react';
 import { supabase } from './supabase';
 
 // ====== CATÁLOGOS ======
@@ -16,6 +16,7 @@ const EMPRESAS_CATALOGO = [
   'COMTECSA SITES',
   'ECHEVERRIA IZQUIERDO',
   'JEJ',
+  'MAJOR DRILLING',
   'MINING TAG',
   'SECHE',
   'TOLOZA',
@@ -55,7 +56,8 @@ const SERVICIOS_CATALOGO = [
   { nombre: 'Torqueo de Neumáticos', requiereCantidad: false },
   { nombre: 'Mantención Aire Acondicionado', requiereCantidad: false },
   { nombre: 'Cambio Filtro Aire', requiereCantidad: false },
-  { nombre: 'Cambio Filtro Polen', requiereCantidad: false }
+  { nombre: 'Cambio Filtro Polen', requiereCantidad: false },
+  { nombre: 'Lavado solo chasis', requiereCantidad: false }
 ];
 
 // EQUIPAMIENTO — la mayoría requiere cantidad
@@ -551,6 +553,7 @@ export default function LuandiApp() {
   const [saving, setSaving] = useState(false);
   const [conectado, setConectado] = useState(true);
   const [selectedIngreso, setSelectedIngreso] = useState(null);
+  const [mostrarLoginAdmin, setMostrarLoginAdmin] = useState(false);
   const [filterPatente, setFilterPatente] = useState('');
   // Filtros multi-select: arreglo vacío = sin filtro
   const [filterEmpresas, setFilterEmpresas] = useState([]);
@@ -661,6 +664,17 @@ export default function LuandiApp() {
   };
 
   const showAlert = (title, message) => setAlertModal({ title, message });
+
+  const abrirModuloEDP = () => {
+    if (tieneSesionAdmin()) setView('edp');
+    else setMostrarLoginAdmin(true);
+  };
+
+  const cerrarSesionAdmin = () => {
+    try { sessionStorage.removeItem('admin_auth'); } catch (e) { /* sin sessionStorage */ }
+    setView('home');
+    showToast('Sesión admin cerrada', 'info');
+  };
   const showConfirm = (config) => setConfirmModal(config);
 
   const obtenerSiguienteNumero = async () => {
@@ -846,15 +860,7 @@ export default function LuandiApp() {
       showToast('No hay registros para exportar', 'info');
       return;
     }
-    const rows = ingresosList.map(construirFilaCSV);
-    const csv = [HEADERS_CSV, ...rows].map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    descargarCSV([HEADERS_CSV, ...ingresosList.map(construirFilaCSV)], filename);
     showToast(`${ingresosList.length} registros exportados`);
   };
 
@@ -959,13 +965,16 @@ export default function LuandiApp() {
 
       {alertModal && <AlertModal title={alertModal.title} message={alertModal.message} onClose={() => setAlertModal(null)} />}
       {confirmModal && <ConfirmModal {...confirmModal} />}
+      {mostrarLoginAdmin && (
+        <LoginAdminModal onSuccess={() => { setMostrarLoginAdmin(false); setView('edp'); }} onClose={() => setMostrarLoginAdmin(false)} />
+      )}
       {mostrarSelectorPeriodo && (
         <SelectorPeriodo periodos={periodosDisponibles} periodoActual={periodoSeleccionado} onSelect={(p) => { setPeriodoSeleccionado(p); setMostrarSelectorPeriodo(false); }} onClose={() => setMostrarSelectorPeriodo(false)} />
       )}
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
         {view === 'home' && (
-          <HomeView ingresos={ingresos} ingresosDelPeriodo={ingresosDelPeriodo} periodoLabel={getPeriodoLabel(periodoSeleccionado)} onNuevo={() => { setSelectedIngreso(null); setView('nuevo'); }} onHistorial={() => setView('historial')} onExportar={exportarExcelTodo} />
+          <HomeView ingresos={ingresos} ingresosDelPeriodo={ingresosDelPeriodo} periodoLabel={getPeriodoLabel(periodoSeleccionado)} onNuevo={() => { setSelectedIngreso(null); setView('nuevo'); }} onHistorial={() => setView('historial')} onExportar={exportarExcelTodo} onModuloEDP={abrirModuloEDP} />
         )}
         {view === 'nuevo' && (
           <FormularioIngreso ingreso={selectedIngreso} onGuardar={guardarIngreso} onCancelar={() => setView(selectedIngreso ? 'historial' : 'home')} saving={saving} showAlert={showAlert} />
@@ -1003,6 +1012,9 @@ export default function LuandiApp() {
         {view === 'detalle' && selectedIngreso && (
           <DetalleView ingreso={selectedIngreso} onVolver={() => setView('historial')} onPDF={async () => { const c = await cargarFirmas(selectedIngreso); setSelectedIngreso(c); generarPDF(c); }} onEntregar={async () => { setSelectedIngreso(await cargarFirmas(selectedIngreso)); setView('entrega'); }} onEditar={async () => { setSelectedIngreso(await cargarFirmas(selectedIngreso)); setView('nuevo'); }} onRevertir={() => revertirEstado(selectedIngreso)} />
         )}
+        {view === 'edp' && (
+          <ModuloEDPView onCerrarSesion={cerrarSesionAdmin} showToast={showToast} />
+        )}
         {view === 'entrega' && selectedIngreso && (
           <FormularioEntrega ingreso={selectedIngreso} onGuardar={cerrarEntrega} onCancelar={() => setView('historial')} saving={saving} showAlert={showAlert} />
         )}
@@ -1015,6 +1027,407 @@ export default function LuandiApp() {
           <p>contacto@luandiservicios.com · www.luandiservicios.com</p>
         </div>
       </footer>
+    </div>
+  );
+}
+
+// ====== MÓDULO EDP (Fase 1: login admin + tarifario) ======
+
+const CLIENTES_TARIFARIO = [
+  'ATLAS COPCO',
+  'BARBARA RENT A CAR',
+  'CBS',
+  'COLORADO (SIGMA)',
+  'COMTECSA C-132',
+  'COMTECSA PEM 612',
+  'COMTECSA SITES',
+  'ECHEVERRIA IZQUIERDO',
+  'MAJOR DRILLING',
+  'SECHE'
+];
+
+// Categorías de cobro (distintas de TIPOS_VEHICULO; "Camion" va sin tilde)
+const CATEGORIAS_TARIFARIO = ['Camioneta', 'Camion', 'Minibus', 'Bus'];
+
+const MAX_INTENTOS_ADMIN = 3;
+const BLOQUEO_ADMIN_MS = 30000;
+
+function leerSesion(clave) {
+  try { return sessionStorage.getItem(clave); } catch (e) { return null; }
+}
+
+function guardarSesion(clave, valor) {
+  try { sessionStorage.setItem(clave, valor); } catch (e) { /* sin sessionStorage */ }
+}
+
+function tieneSesionAdmin() {
+  return leerSesion('admin_auth') === 'true';
+}
+
+async function sha256Hex(texto) {
+  const buffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto));
+  return Array.from(new Uint8Array(buffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function descargarCSV(filas, filename) {
+  const csv = filas.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function formatCLP(valor) {
+  return '$' + Number(valor).toLocaleString('es-CL');
+}
+
+function claveTarifa(cliente, categoria, servicio) {
+  return `${cliente}|${categoria}|${servicio}`;
+}
+
+function LoginAdminModal({ onSuccess, onClose }) {
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [verificando, setVerificando] = useState(false);
+  const [intentos, setIntentos] = useState(() => parseInt(leerSesion('admin_intentos') || '0', 10));
+  const [bloqueadoHasta, setBloqueadoHasta] = useState(() => parseInt(leerSesion('admin_bloqueo_hasta') || '0', 10));
+  const [ahora, setAhora] = useState(Date.now());
+
+  const segundosRestantes = Math.max(0, Math.ceil((bloqueadoHasta - ahora) / 1000));
+  const bloqueado = segundosRestantes > 0;
+
+  useEffect(() => {
+    if (!bloqueado) return;
+    const timer = setInterval(() => setAhora(Date.now()), 500);
+    return () => clearInterval(timer);
+  }, [bloqueado]);
+
+  const verificar = async (e) => {
+    e.preventDefault();
+    if (bloqueado || verificando || !password) return;
+    setVerificando(true);
+    setError('');
+    try {
+      const [hash, { data, error: errorDb }] = await Promise.all([
+        sha256Hex(password),
+        supabase.from('admin_sessions').select('password_hash').order('id').limit(1)
+      ]);
+      if (errorDb) throw errorDb;
+      if (!data || data.length === 0) throw new Error('No hay contraseña admin configurada en la base de datos.');
+
+      if (hash === data[0].password_hash) {
+        guardarSesion('admin_auth', 'true');
+        guardarSesion('admin_intentos', '0');
+        onSuccess();
+        return;
+      }
+
+      const nuevosIntentos = intentos + 1;
+      if (nuevosIntentos >= MAX_INTENTOS_ADMIN) {
+        const hasta = Date.now() + BLOQUEO_ADMIN_MS;
+        setBloqueadoHasta(hasta);
+        setAhora(Date.now());
+        setIntentos(0);
+        guardarSesion('admin_bloqueo_hasta', String(hasta));
+        guardarSesion('admin_intentos', '0');
+        setError(`Demasiados intentos fallidos. Espere ${BLOQUEO_ADMIN_MS / 1000} segundos.`);
+      } else {
+        setIntentos(nuevosIntentos);
+        guardarSesion('admin_intentos', String(nuevosIntentos));
+        const quedan = MAX_INTENTOS_ADMIN - nuevosIntentos;
+        setError(`Contraseña incorrecta. Le ${quedan === 1 ? 'queda 1 intento' : `quedan ${quedan} intentos`}.`);
+      }
+      setPassword('');
+    } catch (err) {
+      setError('No se pudo verificar la contraseña: ' + err.message);
+    } finally {
+      setVerificando(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <form onSubmit={verificar} className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+            <KeyRound className="text-blue-700" size={20} />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-bold text-slate-900 text-lg">Acceso Módulo EDP</h3>
+            <p className="text-sm text-slate-600 mt-1">Ingrese la contraseña de administrador.</p>
+          </div>
+        </div>
+        <input
+          type="password"
+          autoFocus
+          className="input mb-2"
+          placeholder="Contraseña"
+          value={password}
+          disabled={bloqueado || verificando}
+          onChange={e => setPassword(e.target.value)}
+        />
+        {bloqueado ? (
+          <p className="text-sm text-amber-700 mb-3 flex items-center gap-1"><Lock size={14} /> Bloqueado. Reintente en {segundosRestantes} s.</p>
+        ) : error ? (
+          <p className="text-sm text-red-600 mb-3">{error}</p>
+        ) : <div className="mb-3" />}
+        <div className="flex gap-2">
+          <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Cancelar</button>
+          <button type="submit" disabled={bloqueado || verificando || !password} className="flex-1 btn-primary justify-center disabled:opacity-50 disabled:cursor-not-allowed">
+            {verificando ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Ingresar
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ModuloEDPView({ onCerrarSesion, showToast }) {
+  const [seccion, setSeccion] = useState('tablero');
+  // Tarifario cacheado: { 'CLIENTE|Categoria|Servicio': precio | null }
+  const [tarifas, setTarifas] = useState({});
+  const [cargando, setCargando] = useState(true);
+  const [errorCarga, setErrorCarga] = useState('');
+
+  const cargarTarifas = async () => {
+    setCargando(true);
+    setErrorCarga('');
+    try {
+      const { data, error } = await supabase.from('clientes_tarifas').select('cliente, categoria_vehiculo, servicio, precio_neto').range(0, 4999);
+      if (error) throw error;
+      const mapa = {};
+      data.forEach(t => { mapa[claveTarifa(t.cliente, t.categoria_vehiculo, t.servicio)] = t.precio_neto; });
+      setTarifas(mapa);
+    } catch (e) {
+      setErrorCarga(e.message);
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  useEffect(() => { cargarTarifas(); }, []);
+
+  const conPrecio = Object.values(tarifas).filter(v => v != null).length;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          {seccion !== 'tablero' && (
+            <button onClick={() => setSeccion('tablero')} className="p-2 rounded-lg hover:bg-slate-100 text-slate-600 cursor-pointer" title="Volver al tablero">
+              <ChevronLeft size={20} />
+            </button>
+          )}
+          <div className="min-w-0">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900">{seccion === 'tarifario' ? 'Tarifario' : 'Módulo EDP'}</h2>
+            <p className="text-sm text-slate-500">{seccion === 'tarifario' ? 'Precios netos por cliente, categoría y servicio' : 'Estados de pago por cliente'}</p>
+          </div>
+        </div>
+        <button onClick={onCerrarSesion} className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-300 bg-white text-sm font-medium text-slate-700 hover:bg-slate-50 cursor-pointer">
+          <LogOut size={16} /> Cerrar sesión admin
+        </button>
+      </div>
+
+      {cargando ? (
+        <div className="flex items-center justify-center py-16 text-slate-500 gap-2"><Loader2 className="animate-spin" size={20} /> Cargando tarifario...</div>
+      ) : errorCarga ? (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-5 text-sm text-red-700">
+          <p className="font-semibold mb-1">No se pudo cargar el tarifario</p>
+          <p className="mb-3">{errorCarga}</p>
+          <button onClick={cargarTarifas} className="btn-secondary">Reintentar</button>
+        </div>
+      ) : seccion === 'tablero' ? (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <ActionCard onClick={() => setSeccion('tarifario')} icon={<DollarSign size={28} />} title="Tarifario" description={`${conPrecio} precios cargados para ${CLIENTES_TARIFARIO.length} clientes`} primary />
+          <ActionCard onClick={() => showToast('Generar EDP: disponible en Fase 2', 'info')} icon={<FileText size={28} />} title="Generar EDP" description="Disponible en Fase 2" />
+          <ActionCard onClick={() => showToast('Historial EDPs: disponible en Fase 2', 'info')} icon={<History size={28} />} title="Historial EDPs" description="Disponible en Fase 2" />
+        </div>
+      ) : (
+        <TarifarioView tarifas={tarifas} setTarifas={setTarifas} showToast={showToast} />
+      )}
+    </div>
+  );
+}
+
+function TarifarioView({ tarifas, setTarifas, showToast }) {
+  const [cliente, setCliente] = useState(CLIENTES_TARIFARIO[0]);
+  const [mostrarDuplicar, setMostrarDuplicar] = useState(false);
+
+  const guardarPrecio = async (categoria, servicio, precio) => {
+    const clave = claveTarifa(cliente, categoria, servicio);
+    const anterior = tarifas[clave] ?? null;
+    setTarifas(prev => ({ ...prev, [clave]: precio }));
+    const { error } = await supabase.from('clientes_tarifas').upsert(
+      { cliente, categoria_vehiculo: categoria, servicio, precio_neto: precio, fecha_actualizacion: new Date().toISOString() },
+      { onConflict: 'cliente,categoria_vehiculo,servicio' }
+    );
+    if (error) {
+      setTarifas(prev => ({ ...prev, [clave]: anterior }));
+      showToast('Error al guardar precio: ' + error.message, 'error');
+      return;
+    }
+    showToast(`${cliente} · ${categoria}: ${precio == null ? 'precio eliminado' : formatCLP(precio) + ' guardado'}`);
+  };
+
+  const duplicar = async (origen, destino) => {
+    const filas = [];
+    CATEGORIAS_TARIFARIO.forEach(cat => SERVICIOS_CATALOGO.forEach(s => {
+      filas.push({ cliente: destino, categoria_vehiculo: cat, servicio: s.nombre, precio_neto: tarifas[claveTarifa(origen, cat, s.nombre)] ?? null, fecha_actualizacion: new Date().toISOString() });
+    }));
+    const { error } = await supabase.from('clientes_tarifas').upsert(filas, { onConflict: 'cliente,categoria_vehiculo,servicio' });
+    if (error) {
+      showToast('Error al duplicar: ' + error.message, 'error');
+      return;
+    }
+    setTarifas(prev => {
+      const nuevo = { ...prev };
+      filas.forEach(f => { nuevo[claveTarifa(f.cliente, f.categoria_vehiculo, f.servicio)] = f.precio_neto; });
+      return nuevo;
+    });
+    setMostrarDuplicar(false);
+    setCliente(destino);
+    showToast(`Precios de ${origen} copiados a ${destino}`);
+  };
+
+  const exportar = () => {
+    const filas = [['Categoría', 'Servicio', ...CLIENTES_TARIFARIO]];
+    CATEGORIAS_TARIFARIO.forEach(cat => SERVICIOS_CATALOGO.forEach(s => {
+      filas.push([cat, s.nombre, ...CLIENTES_TARIFARIO.map(c => tarifas[claveTarifa(c, cat, s.nombre)] ?? '')]);
+    }));
+    descargarCSV(filas, `Luandi_Tarifario_${new Date().toISOString().split('T')[0]}.csv`);
+    showToast('Tarifario exportado');
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-4">
+      {mostrarDuplicar && <DuplicarTarifasModal clienteActual={cliente} onDuplicar={duplicar} onClose={() => setMostrarDuplicar(false)} />}
+
+      <aside className="bg-white rounded-xl border border-slate-200 p-3 h-fit">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide px-2 mb-2">Clientes</p>
+        <div className="flex flex-wrap lg:flex-col gap-1">
+          {CLIENTES_TARIFARIO.map(c => (
+            <button
+              key={c}
+              onClick={() => setCliente(c)}
+              className={`text-left px-3 py-2 rounded-lg text-sm cursor-pointer ${c === cliente ? 'bg-blue-700 text-white font-semibold' : 'text-slate-700 hover:bg-slate-100'}`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => setMostrarDuplicar(true)} className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50 cursor-pointer">
+          <Copy size={16} /> Duplicar de otro cliente
+        </button>
+      </aside>
+
+      <section className="bg-white rounded-xl border border-slate-200 overflow-hidden min-w-0">
+        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h3 className="font-bold text-slate-900">{cliente}</h3>
+            <p className="text-xs text-slate-500">Precios netos (sin IVA). Se guardan al salir de la celda.</p>
+          </div>
+          <button onClick={exportar} className="btn-secondary inline-flex items-center gap-2 cursor-pointer">
+            <Download size={16} /> Exportar tarifario
+          </button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-200 text-slate-600">
+                <th className="text-left font-semibold px-4 py-2 min-w-[220px]">Servicio</th>
+                {CATEGORIAS_TARIFARIO.map(cat => <th key={cat} className="text-right font-semibold px-2 py-2 min-w-[110px]">{cat}</th>)}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {SERVICIOS_CATALOGO.map(s => (
+                <tr key={s.nombre} className="hover:bg-slate-50">
+                  <td className="px-4 py-1.5 text-slate-800">{s.nombre}</td>
+                  {CATEGORIAS_TARIFARIO.map(cat => (
+                    <td key={cat} className="px-2 py-1.5">
+                      <PrecioCelda
+                        key={claveTarifa(cliente, cat, s.nombre)}
+                        valor={tarifas[claveTarifa(cliente, cat, s.nombre)] ?? null}
+                        onGuardar={(precio) => guardarPrecio(cat, s.nombre, precio)}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PrecioCelda({ valor, onGuardar }) {
+  const [editando, setEditando] = useState(false);
+  const [texto, setTexto] = useState('');
+
+  const mostrar = editando ? texto : (valor == null ? '' : formatCLP(valor));
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      placeholder="—"
+      value={mostrar}
+      onFocus={(e) => { setEditando(true); setTexto(valor == null ? '' : String(valor)); setTimeout(() => e.target.select(), 0); }}
+      onChange={(e) => setTexto(e.target.value.replace(/\D/g, ''))}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+      onBlur={() => {
+        setEditando(false);
+        const nuevo = texto === '' ? null : parseInt(texto, 10);
+        if (nuevo !== valor) onGuardar(nuevo);
+      }}
+      className={`w-full text-right px-2 py-1.5 rounded-md border text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-blue-500 ${valor == null ? 'border-dashed border-slate-300 bg-slate-50' : 'border-slate-200 bg-white'}`}
+    />
+  );
+}
+
+function DuplicarTarifasModal({ clienteActual, onDuplicar, onClose }) {
+  const [origen, setOrigen] = useState(CLIENTES_TARIFARIO.find(c => c !== clienteActual));
+  const [destino, setDestino] = useState(clienteActual);
+  const [confirmando, setConfirmando] = useState(false);
+  const [copiando, setCopiando] = useState(false);
+
+  if (confirmando) {
+    return (
+      <ConfirmModal
+        title="¿Duplicar precios?"
+        message={`Se copiarán los ${CATEGORIAS_TARIFARIO.length * SERVICIOS_CATALOGO.length} precios de ${origen} a ${destino}.\n\nLos precios actuales de ${destino} se sobrescribirán.`}
+        confirmText={copiando ? 'Copiando...' : 'Duplicar'}
+        confirmColor="amber"
+        onConfirm={async () => { if (copiando) return; setCopiando(true); await onDuplicar(origen, destino); setCopiando(false); }}
+        onCancel={() => setConfirmando(false)}
+      />
+    );
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+        <h3 className="font-bold text-slate-900 text-lg mb-4 flex items-center gap-2"><Copy size={20} className="text-blue-700" /> Duplicar tarifario</h3>
+        <Field label="Copiar precios desde">
+          <select className="input" value={origen} onChange={e => setOrigen(e.target.value)}>
+            {CLIENTES_TARIFARIO.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </Field>
+        <Field label="Hacia" className="mt-3">
+          <select className="input" value={destino} onChange={e => setDestino(e.target.value)}>
+            {CLIENTES_TARIFARIO.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </Field>
+        {origen === destino && <p className="text-sm text-amber-700 mt-2">Elija clientes distintos.</p>}
+        <div className="flex gap-2 mt-5">
+          <button onClick={onClose} className="flex-1 btn-secondary justify-center">Cancelar</button>
+          <button onClick={() => setConfirmando(true)} disabled={origen === destino} className="flex-1 btn-primary justify-center disabled:opacity-50 disabled:cursor-not-allowed">Continuar</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1061,7 +1474,7 @@ function SelectorPeriodo({ periodos, periodoActual, onSelect, onClose }) {
   );
 }
 
-function HomeView({ ingresos, ingresosDelPeriodo, periodoLabel, onNuevo, onHistorial, onExportar }) {
+function HomeView({ ingresos, ingresosDelPeriodo, periodoLabel, onNuevo, onHistorial, onExportar, onModuloEDP }) {
   const enProceso = ingresos.filter(i => i.estado === 'en_proceso').length;
   const entregados = ingresos.filter(i => i.estado === 'entregado').length;
   const hoy = ingresos.filter(i => new Date(i.fecha_creacion).toDateString() === new Date().toDateString()).length;
@@ -1079,10 +1492,11 @@ function HomeView({ ingresos, ingresosDelPeriodo, periodoLabel, onNuevo, onHisto
         <StatCard label="Hoy" value={hoy} color="blue" icon={<Calendar size={20} />} />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <ActionCard onClick={onNuevo} icon={<Plus size={28} />} title="Nuevo Ingreso" description="Registrar un nuevo vehículo ingresando al taller" primary />
         <ActionCard onClick={onHistorial} icon={<ClipboardList size={28} />} title="Historial" description={`${ingresosDelPeriodo.length} ingresos en ${periodoLabel}`} />
         <ActionCard onClick={onExportar} icon={<Download size={28} />} title="Exportar Todo" description="Descargar consolidado completo de todos los registros" />
+        <ActionCard onClick={onModuloEDP} icon={<Receipt size={28} />} title="Módulo EDP" description="Estados de pago y tarifario por cliente (acceso admin)" />
       </div>
 
       {ingresos.length > 0 && (
