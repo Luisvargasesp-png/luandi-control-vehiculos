@@ -281,6 +281,12 @@ Módulo separado de los flujos de ingreso/historial, protegido por contraseña a
 - "Exportar tarifario": CSV `Luandi_Tarifario_YYYY-MM-DD.csv` con formato matriz (filas categoría + servicio, columnas clientes), igual que el Excel original de precios.
 - El Excel fuente (`listado precio por cliente.xlsx`) está en `.gitignore`.
 
+### Pendientes acordados con Luis (13 nov 2026)
+
+- **Cambiar contraseña admin:** el hash de `luandi2026` quedó público en `sql/edp_fase1.sql`. Luis la cambiará cuando haya más usuarios en el módulo. No proponerlo antes.
+- **Mover el proyecto fuera de `~/Documents`** (iCloud saca `node_modules` a la nube y traba el build): se resuelve en otra sesión.
+- **Fase 2 — tarifas faltantes:** se coordina cuando Luis tenga definidos los precios de SUV, Furgón, Maquinaria, Automóvil, los de Camión que faltan (celdas NULL) y Adblue. No inventar precios ni reglas de cobro: preguntar.
+
 ## Workflow con Claude Code
 
 Luis es dueño de la lógica de negocio. Claude Code debe:
