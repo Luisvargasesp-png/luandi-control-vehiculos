@@ -12,3 +12,6 @@ dist/
 
 # Lista de precios (no subir a GitHub)
 listado precio por cliente.xlsx
+
+# Notas locales de Claude con datos sensibles
+CLAUDE.local.md

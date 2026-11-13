@@ -28,6 +28,9 @@ luandi-control-vehiculos/
 ├── postcss.config.js
 ├── index.html
 ├── .env.local                # VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY (local, no se sube)
+├── CLAUDE.local.md           # datos sensibles (contraseña admin EDP) — local, no se sube
+├── sql/
+│   └── edp_fase1.sql         # tablas del módulo EDP + tarifario inicial (ya ejecutado)
 └── src/
     ├── main.jsx
     ├── index.css             # clases @layer: .input, .btn-primary, .btn-secondary
@@ -98,8 +101,8 @@ Tabla secundaria `contador` con registro único `id=1, valor=7150` (manejado por
 
 ## Catálogos
 
-### EMPRESAS (14, orden alfabético)
-ARAMARK, ATLAS COPCO, BARBARA RENT A CAR, BESALCO, CBS, COLORADO (SIGMA), COMTECSA, ECHEVERRIA IZQUIERDO, JEJ, MINING TAG, SECHE, TOLOZA, VILLA TRAVEL
+### EMPRESAS (16, orden alfabético)
+ARAMARK, ATLAS COPCO, BARBARA RENT A CAR, BESALCO, CBS, COLORADO (SIGMA), COMTECSA C-132, COMTECSA PEM 612, COMTECSA SITES, ECHEVERRIA IZQUIERDO, JEJ, MAJOR DRILLING, MINING TAG, SECHE, TOLOZA, VILLA TRAVEL
 
 ### MARCAS → MODELOS
 ```
@@ -126,7 +129,7 @@ VOLVO:         (sin modelos)
 ### TIPOS DE VEHÍCULO
 Camioneta, Camión, Bus, Minibus, Automóvil, SUV, Furgón, Maquinaria
 
-### SERVICIOS REALIZADOS (13)
+### SERVICIOS REALIZADOS (14)
 ```
 Lavado Full (exterior, interior y chasis)
 Lavado Full Diurno (Comtecsa)
@@ -141,6 +144,7 @@ Torqueo de Neumáticos
 Mantención Aire Acondicionado
 Cambio Filtro Aire
 Cambio Filtro Polen
+Lavado solo chasis
 ```
 
 ### EQUIPAMIENTO (12)
@@ -244,6 +248,39 @@ Se abre en nueva pestaña y se dispara `window.print()` automáticamente.
 - Microsoft 365 personal del usuario (no se usa)
 - Dominio propio luandi.app por ahora (dejar luandi-control-vehiculos.vercel.app)
 
+## Módulo EDP (Estados de Pago)
+
+Módulo separado de los flujos de ingreso/historial, protegido por contraseña admin. Se entra desde la tarjeta "Módulo EDP" en el inicio (`view === 'edp'`).
+
+**Estado:** Fase 1 lista (13 nov 2026): login admin + tarifario. Fase 2 pendiente: generar EDP e historial de EDPs (las tarjetas muestran "Disponible en Fase 2").
+
+### Tablas Supabase (creadas con `sql/edp_fase1.sql`)
+
+- **`admin_sessions`** — `id`, `password_hash` (SHA-256 hex), `created_at`, `updated_at`. Un solo registro. RLS: **solo SELECT** (la app no puede cambiar la contraseña).
+- **`clientes_tarifas`** — `cliente`, `categoria_vehiculo`, `servicio`, `precio_neto` INTEGER (NULL = sin precio), `activo`, `fecha_actualizacion`. UNIQUE (cliente, categoria_vehiculo, servicio). Índices: cliente, servicio. RLS abierto. Precargada con 560 filas (10 clientes × 4 categorías × 14 servicios; 305 con precio).
+- **`estados_pago`** — para Fase 2, vacía. `cliente`, `n_edp_cliente` (correlativo por cliente, UNIQUE con cliente), `rut_cliente`, `periodo_desde/hasta`, `n_cotizacion_kame`, `solicitante`, `total_neto`, `iva`, `total`, `estado` ('borrador' | 'emitido' | 'pagado'), `fecha_emision/envio/pago`, `observaciones`. Índices: cliente, periodo_desde, estado. RLS abierto.
+
+### Login admin
+
+- Contraseña: ver `CLAUDE.local.md` (no se sube al repo porque el repo es público).
+- `LoginAdminModal`: calcula SHA-256 client-side con `crypto.subtle.digest` (Web Crypto, sin bcrypt) y compara con `admin_sessions.password_hash`.
+- Éxito → `sessionStorage.admin_auth = 'true'` (dura hasta cerrar el navegador).
+- 3 intentos fallidos → bloqueo de 30 s con cuenta regresiva (`admin_intentos`, `admin_bloqueo_hasta` en sessionStorage, sobrevive cerrar el modal).
+- "Cerrar sesión admin" borra `admin_auth` y vuelve al inicio.
+- **Para cambiar la contraseña:** calcular el hash (`node -e "console.log(require('crypto').createHash('sha256').update('NUEVA').digest('hex'))"`) y correr en Supabase `UPDATE admin_sessions SET password_hash = '<hash>', updated_at = NOW();`. No commitear la nueva contraseña ni su hash.
+- ⚠️ Es una barrera contra accesos por error, no seguridad real: con RLS abierto y la anon key pública, alguien técnico puede leer/escribir las tablas directo. Para proteger montos de verdad se necesita Supabase Auth.
+
+### Tarifario (`TarifarioView`)
+
+- **Clientes (10, `CLIENTES_TARIFARIO`):** ATLAS COPCO, BARBARA RENT A CAR, CBS, COLORADO (SIGMA), COMTECSA C-132, COMTECSA PEM 612, COMTECSA SITES, ECHEVERRIA IZQUIERDO, MAJOR DRILLING, SECHE. Mismos nombres que `EMPRESAS_CATALOGO` (necesario para cruzar con ingresos en Fase 2).
+- **Categorías (`CATEGORIAS_TARIFARIO`):** Camioneta, Camion (**sin tilde**, decisión de Luis), Minibus, Bus. Distintas de `TIPOS_VEHICULO`: en Fase 2 hay que mapear "Camión" → "Camion" y definir qué pasa con Automóvil/SUV/Furgón/Maquinaria (sin tarifa).
+- **Servicios:** los 14 de `SERVICIOS_CATALOGO`. "Recarga de Adblue" no venía en el Excel de precios → NULL (probablemente se cobra por litro; definir en Fase 2).
+- Se carga una vez al entrar al módulo (`ModuloEDPView`) y queda cacheado en estado local como mapa `'CLIENTE|Categoria|Servicio' → precio`.
+- Cada celda (`PrecioCelda`) guarda con `upsert` al perder foco o con Enter; toast verde. Celda vacía = NULL. Si falla, revierte el valor.
+- "Duplicar de otro cliente" (`DuplicarTarifasModal`): copia los 56 precios de origen a destino, **sobrescribe** el destino, con confirmación.
+- "Exportar tarifario": CSV `Luandi_Tarifario_YYYY-MM-DD.csv` con formato matriz (filas categoría + servicio, columnas clientes), igual que el Excel original de precios.
+- El Excel fuente (`listado precio por cliente.xlsx`) está en `.gitignore`.
+
 ## Workflow con Claude Code
 
 Luis es dueño de la lógica de negocio. Claude Code debe:
@@ -255,6 +292,7 @@ Luis es dueño de la lógica de negocio. Claude Code debe:
 5. **Después de un cambio en Supabase (SQL),** avisar a Luis que debe correrse el ALTER TABLE ANTES del redeploy de código.
 6. **Para probar localmente:** `npm run dev` → http://localhost:5173
 7. **Para build:** `npm run build`
+8. **Si `npm run dev` o `npm run build` se quedan pegados en "transforming...":** iCloud (carpeta Documents) mandó archivos de `node_modules` a la nube. Solución: mover/borrar `node_modules` y correr `npm install`.
 
 ## Pendiente al cerrar la sesión del chat Claude.ai (26 oct 2026)
 
