@@ -1,27 +1,10 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, ChevronDown, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock, Loader2, Cloud, CloudOff, FolderOpen, AlertTriangle, Lock, RotateCcw, Receipt, DollarSign, History, LogOut, Copy, KeyRound } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo, useCallback, useContext } from 'react';
+import { Car, Plus, Search, FileText, Download, Trash2, Edit2, X, Check, ChevronLeft, ChevronRight, ChevronDown, Calendar, Building2, Wrench, ClipboardList, PenLine, Eye, AlertCircle, CheckCircle2, Clock, Loader2, Cloud, CloudOff, FolderOpen, AlertTriangle, Lock, RotateCcw, Receipt, DollarSign, History, LogOut, Copy, KeyRound, EyeOff, MoreVertical, UserPlus, Info } from 'lucide-react';
 import { supabase } from './supabase';
 
 // ====== CATÁLOGOS ======
 
-const EMPRESAS_CATALOGO = [
-  'ARAMARK',
-  'ATLAS COPCO',
-  'BARBARA RENT A CAR',
-  'BESALCO',
-  'CBS',
-  'COLORADO (SIGMA)',
-  'COMTECSA C-132',
-  'COMTECSA PEM 612',
-  'COMTECSA SITES',
-  'ECHEVERRIA IZQUIERDO',
-  'JEJ',
-  'MAJOR DRILLING',
-  'MINING TAG',
-  'SECHE',
-  'TOLOZA',
-  'VILLA TRAVEL'
-];
+// Las EMPRESAS viven en la tabla `empresas` de Supabase (ver EmpresasProvider / useEmpresas)
 
 const MARCAS_CATALOGO = {
   'CHANGAN': [],
@@ -407,10 +390,238 @@ function SelectConOtro({ label, valor, opciones, onChange, placeholder, uppercas
   );
 }
 
+// ====== EMPRESAS (tabla dinámica en Supabase) ======
+
+const EmpresasContext = React.createContext(null);
+
+const ordenarPorNombre = (a, b) => a.nombre.localeCompare(b.nombre, 'es');
+
+// Carga la tabla `empresas` una vez y la mantiene al día con Realtime.
+function EmpresasProvider({ children }) {
+  const [empresas, setEmpresas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const recargar = useCallback(async () => {
+    try {
+      const { data, error: errorDb } = await supabase.from('empresas').select('*').order('nombre');
+      if (errorDb) throw errorDb;
+      setEmpresas([...(data || [])].sort(ordenarPorNombre));
+      setError('');
+    } catch (e) {
+      console.error('Error cargando empresas:', e);
+      setError(e.message || 'Error desconocido');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const reintentar = useCallback(() => { setLoading(true); recargar(); }, [recargar]);
+
+  useEffect(() => {
+    recargar();
+    const subscription = supabase
+      .channel('empresas_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'empresas' }, () => { recargar(); })
+      .subscribe();
+    return () => { subscription.unsubscribe(); };
+  }, [recargar]);
+
+  const value = useMemo(() => {
+    const activas = empresas.filter(e => e.activo);
+    return {
+      empresas,                                                       // todas, incluye desactivadas
+      activas,                                                        // Historial y Tarifario
+      paraNuevoIngreso: activas.filter(e => e.visible_en_nuevo_ingreso !== false),
+      loading,
+      error,
+      recargar,
+      reintentar
+    };
+  }, [empresas, loading, error, recargar, reintentar]);
+
+  return <EmpresasContext.Provider value={value}>{children}</EmpresasContext.Provider>;
+}
+
+function useEmpresas() {
+  const ctx = useContext(EmpresasContext);
+  if (!ctx) throw new Error('useEmpresas debe usarse dentro de <EmpresasProvider>');
+  return ctx;
+}
+
+async function contarIngresosEmpresa(nombre) {
+  const { count, error } = await supabase.from('ingresos').select('id', { count: 'exact', head: true }).eq('nombre_empresa', nombre);
+  if (error) throw error;
+  return count || 0;
+}
+
+// Para comparar nombres sin importar mayúsculas ni tildes ("SAN JOSE" = "SAN JOSÉ")
+const sinTildes = (s) => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().trim();
+
+// Mayúsculas, sin espacios dobles ni caracteres invisibles (el caso ORBIT)
+function normalizarNombreCliente(s) {
+  return (s || '').normalize('NFC').replace(/[​-‍﻿ ]/g, ' ').replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ====== RUT CHILENO ======
+
+function limpiarRut(rut) {
+  return (rut || '').replace(/[^0-9kK]/g, '').toUpperCase();
+}
+
+// Módulo 11: dígitos de derecha a izquierda × 2,3,4,5,6,7,2,3...; DV = 11 - (suma % 11)
+function calcularDvRut(cuerpo) {
+  let suma = 0;
+  let factor = 2;
+  for (const d of cuerpo.split('').reverse()) {
+    suma += Number(d) * factor;
+    factor = factor === 7 ? 2 : factor + 1;
+  }
+  const resto = 11 - (suma % 11);
+  return resto === 11 ? '0' : resto === 10 ? 'K' : String(resto);
+}
+
+// Devuelve '' si el RUT es válido, o el motivo del error
+function validarRut(rut) {
+  const limpio = limpiarRut(rut);
+  const cuerpo = limpio.slice(0, -1);
+  const dv = limpio.slice(-1);
+  if (!/^\d{7,8}$/.test(cuerpo)) return 'El RUT debe tener 7 u 8 dígitos más el dígito verificador (ej: 77.123.456-9).';
+  if (/^(\d)\1+$/.test(cuerpo)) return 'RUT ficticio: todos los dígitos son iguales.';
+  if (calcularDvRut(cuerpo) !== dv) return 'RUT inválido: el dígito verificador no corresponde.';
+  return '';
+}
+
+// "771234569" → "77.123.456-9"
+function formatearRut(rut) {
+  const limpio = limpiarRut(rut);
+  const cuerpo = limpio.slice(0, -1).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return `${cuerpo}-${limpio.slice(-1)}`;
+}
+
+// Dropdown con búsqueda, sin texto libre: solo se puede elegir una opción de la lista.
+function SelectBuscable({ label, valor, opciones, onChange, placeholder, loading, error, onReintentar, avisoFueraDeLista, mensajeSinResultados }) {
+  const [abierto, setAbierto] = useState(false);
+  const [busqueda, setBusqueda] = useState('');
+  const [resaltado, setResaltado] = useState(0);
+  const ref = useRef(null);
+  const listaRef = useRef(null);
+
+  useEffect(() => {
+    if (!abierto) return;
+    const cerrarFuera = (e) => { if (ref.current && !ref.current.contains(e.target)) setAbierto(false); };
+    document.addEventListener('mousedown', cerrarFuera);
+    document.addEventListener('touchstart', cerrarFuera);
+    return () => {
+      document.removeEventListener('mousedown', cerrarFuera);
+      document.removeEventListener('touchstart', cerrarFuera);
+    };
+  }, [abierto]);
+
+  const filtradas = useMemo(() => {
+    const q = sinTildes(busqueda);
+    return q ? opciones.filter(o => sinTildes(o).includes(q)) : opciones;
+  }, [busqueda, opciones]);
+
+  useEffect(() => { setResaltado(0); }, [busqueda, abierto]);
+
+  useEffect(() => {
+    if (!abierto || !listaRef.current) return;
+    const el = listaRef.current.children[resaltado];
+    if (el) el.scrollIntoView({ block: 'nearest' });
+  }, [resaltado, abierto]);
+
+  const abrir = () => { setBusqueda(''); setAbierto(true); };
+  const elegir = (o) => { onChange(o); setAbierto(false); setBusqueda(''); };
+
+  const onKeyDown = (e) => {
+    if (!abierto) {
+      if (e.key === 'ArrowDown' || e.key === 'Enter') { e.preventDefault(); abrir(); }
+      return;
+    }
+    if (e.key === 'ArrowDown') { e.preventDefault(); setResaltado(i => Math.min(i + 1, filtradas.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setResaltado(i => Math.max(i - 1, 0)); }
+    else if (e.key === 'Enter') { e.preventDefault(); if (filtradas[resaltado]) elegir(filtradas[resaltado]); }
+    else if (e.key === 'Escape' || e.key === 'Tab') setAbierto(false);
+  };
+
+  if (loading) {
+    return (
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+        <div className="input flex items-center gap-2 text-slate-500"><Loader2 size={16} className="animate-spin" /> Cargando empresas...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div>
+        <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+        <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-sm text-red-700">
+          <span>No se pudieron cargar las empresas.</span>
+          <button type="button" onClick={onReintentar} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white border border-red-200 text-xs font-medium cursor-pointer hover:bg-red-100"><RotateCcw size={12} /> Reintentar</button>
+        </div>
+      </div>
+    );
+  }
+
+  const fueraDeLista = valor && !opciones.includes(valor);
+
+  return (
+    <div className="relative" ref={ref}>
+      <label className="block text-xs font-medium text-slate-600 mb-1">{label}</label>
+      <div className="relative">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+        <input
+          type="text"
+          autoComplete="off"
+          className="input pl-9 pr-9 cursor-pointer"
+          value={abierto ? busqueda : valor}
+          placeholder={abierto ? (valor || 'Escriba para buscar...') : (placeholder || 'Seleccione...')}
+          onFocus={abrir}
+          onClick={() => { if (!abierto) abrir(); }}
+          onChange={(e) => { setBusqueda(e.target.value); if (!abierto) setAbierto(true); }}
+          onKeyDown={onKeyDown}
+        />
+        <ChevronDown size={16} className={`absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none transition-transform ${abierto ? 'rotate-180' : ''}`} />
+      </div>
+      {abierto && (
+        <div className="absolute left-0 right-0 z-30 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg">
+          {filtradas.length > 0 ? (
+            <ul ref={listaRef} className="max-h-64 overflow-y-auto py-1">
+              {filtradas.map((o, idx) => (
+                <li
+                  key={o}
+                  onMouseDown={(e) => { e.preventDefault(); elegir(o); }}
+                  onMouseEnter={() => setResaltado(idx)}
+                  className={`px-3 py-2.5 sm:py-2 text-sm cursor-pointer flex items-center justify-between gap-2 ${idx === resaltado ? 'bg-blue-50 text-blue-900' : 'text-slate-700'}`}
+                >
+                  <span>{o}</span>
+                  {o === valor && <Check size={14} className="text-blue-700 flex-shrink-0" />}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="px-3 py-3 text-sm text-slate-600">
+              <p className="font-medium text-slate-800 mb-1">Sin resultados para "{busqueda}"</p>
+              <p>{mensajeSinResultados}</p>
+            </div>
+          )}
+        </div>
+      )}
+      {fueraDeLista && !abierto && avisoFueraDeLista && <p className="text-xs text-amber-700 mt-1">{avisoFueraDeLista(valor)}</p>}
+    </div>
+  );
+}
+
 // ====== FILTRO DE EMPRESAS ======
-// "Catálogo oficial": el catálogo, pero las empresas que comparten primera palabra
-// (ej: COMTECSA C-132 / PEM 612 / SITES) se agrupan en una sola opción "COMTECSA".
-// "Variantes y Otros": cada variante específica + "Otro" (lo que no calza con ninguna oficial).
+// "Catálogo oficial": las empresas activas, pero las que comparten primera palabra
+// (ej: COMTECSA C-132 / PEM 612 / SITES, SECHE / SECHE CHIQUI) se agrupan en una sola opción.
+// "Variantes y Otros": cada variante específica + "Otro" (lo que no calza con ninguna activa,
+// por ejemplo ingresos de empresas desactivadas).
 const OTRA_EMPRESA = '__otro__';
 const normalizarEmpresa = (s) => (s || '').trim().toUpperCase();
 
@@ -420,34 +631,35 @@ const perteneceA = (empresa, base) => {
   return e === base || (e.startsWith(base) && !/[A-Z0-9ÁÉÍÓÚÑ]/.test(e.charAt(base.length)));
 };
 
-const FAMILIAS_EMPRESA = (() => {
+// Familias = primera palabra compartida por 2+ empresas (COMTECSA, SECHE)
+function familiasDeEmpresas(nombres) {
   const conteo = {};
-  EMPRESAS_CATALOGO.forEach(e => { const p = e.split(' ')[0]; conteo[p] = (conteo[p] || 0) + 1; });
+  nombres.forEach(n => { const p = normalizarEmpresa(n).split(' ')[0]; conteo[p] = (conteo[p] || 0) + 1; });
   return Object.keys(conteo).filter(p => conteo[p] > 1);
-})();
-
-const EMPRESAS_OFICIALES = [...new Set(EMPRESAS_CATALOGO.map(e => FAMILIAS_EMPRESA.find(f => perteneceA(e, f)) || e))];
-
-function construirOpcionesEmpresa(ingresos) {
-  const variantes = new Set();
-  const agregar = (nombre) => {
-    const n = normalizarEmpresa(nombre);
-    if (!n || EMPRESAS_OFICIALES.includes(n)) return;
-    if (EMPRESAS_OFICIALES.some(b => perteneceA(n, b))) variantes.add(n);
-  };
-  EMPRESAS_CATALOGO.forEach(agregar);
-  ingresos.forEach(i => agregar(i.nombre_empresa));
-  return [
-    ...EMPRESAS_OFICIALES.map(e => ({ value: e, label: e, group: 'Catálogo oficial' })),
-    ...[...variantes].sort().map(v => ({ value: v, label: v, group: 'Variantes y Otros' })),
-    { value: OTRA_EMPRESA, label: 'Otro', group: 'Variantes y Otros' }
-  ];
 }
 
-function empresaCoincide(empresa, seleccion) {
-  if (seleccion === OTRA_EMPRESA) return !EMPRESAS_OFICIALES.some(b => perteneceA(empresa, b));
-  if (EMPRESAS_OFICIALES.includes(seleccion)) return perteneceA(empresa, seleccion);
-  return normalizarEmpresa(empresa) === seleccion;
+// `nombres`: empresas activas. Devuelve las opciones del multi-select y la función que evalúa cada ingreso.
+function crearFiltroEmpresas(nombres) {
+  const familias = familiasDeEmpresas(nombres);
+  const etiquetas = new Map();
+  nombres.forEach(n => etiquetas.set(normalizarEmpresa(n), n));
+  const oficiales = [...new Set(nombres.map(n => familias.find(f => perteneceA(n, f)) || normalizarEmpresa(n)))]
+    .sort((a, b) => a.localeCompare(b, 'es'));
+  const variantes = [...etiquetas.keys()].filter(n => !oficiales.includes(n)).sort((a, b) => a.localeCompare(b, 'es'));
+
+  const opciones = [
+    ...oficiales.map(e => ({ value: e, label: etiquetas.get(e) || e, group: 'Catálogo oficial' })),
+    ...variantes.map(v => ({ value: v, label: etiquetas.get(v), group: 'Variantes y Otros' })),
+    { value: OTRA_EMPRESA, label: 'Otro', group: 'Variantes y Otros' }
+  ];
+
+  const coincide = (empresa, seleccion) => {
+    if (seleccion === OTRA_EMPRESA) return !oficiales.some(b => perteneceA(empresa, b));
+    if (oficiales.includes(seleccion)) return perteneceA(empresa, seleccion);
+    return normalizarEmpresa(empresa) === seleccion;
+  };
+
+  return { opciones, coincide };
 }
 
 const etiquetaEmpresa = (v) => v === OTRA_EMPRESA ? 'Otro' : v;
@@ -547,6 +759,15 @@ function CheckItemConCantidad({ item, marcado, cantidad, onToggle, onChangeCanti
 }
 
 export default function LuandiApp() {
+  return (
+    <EmpresasProvider>
+      <LuandiAppContenido />
+    </EmpresasProvider>
+  );
+}
+
+function LuandiAppContenido() {
+  const { empresas, activas } = useEmpresas();
   const [view, setView] = useState('home');
   const [ingresos, setIngresos] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -585,9 +806,18 @@ export default function LuandiApp() {
 
   const cargarIngresos = async () => {
     try {
-      const { data, error } = await supabase.from('ingresos').select(COLUMNAS_LISTA).order('fecha_creacion', { ascending: false }).limit(5000);
-      if (error) throw error;
-      setIngresos((data || []).map(dbToApp));
+      // Supabase entrega máximo 1.000 filas por consulta: se pide por páginas hasta traer todo
+      const PAGINA = 1000;
+      let filas = [];
+      for (let desde = 0; ; desde += PAGINA) {
+        const { data, error } = await supabase.from('ingresos').select(COLUMNAS_LISTA)
+          .order('fecha_creacion', { ascending: false }).order('id', { ascending: false })
+          .range(desde, desde + PAGINA - 1);
+        if (error) throw error;
+        filas = filas.concat(data || []);
+        if (!data || data.length < PAGINA) break;
+      }
+      setIngresos(filas.map(dbToApp));
       setConectado(true);
     } catch (e) {
       console.error('Error cargando ingresos:', e);
@@ -782,12 +1012,26 @@ export default function LuandiApp() {
 
   const ingresosDelPeriodo = ingresos.filter(i => getPeriodoKey(i.fecha_creacion) === periodoSeleccionado);
 
-  const opcionesEmpresa = useMemo(() => construirOpcionesEmpresa(ingresos), [ingresos]);
+  const filtroEmpresas = useMemo(() => crearFiltroEmpresas(activas.map(e => e.nombre)), [activas]);
+  const opcionesEmpresa = filtroEmpresas.opciones;
+
+  // Aviso (solo consola) si algún ingreso tiene una empresa que no existe en la tabla `empresas`
+  const avisoEmpresasRef = useRef('');
+  useEffect(() => {
+    if (!empresas.length || !ingresos.length) return;
+    const conocidas = new Set(empresas.map(e => e.nombre));
+    const faltantes = [...new Set(ingresos.map(i => i.nombre_empresa).filter(n => n && !conocidas.has(n)))].sort();
+    const clave = faltantes.join('|');
+    if (faltantes.length && clave !== avisoEmpresasRef.current) {
+      console.warn('[Luandi] Ingresos con empresa que no existe en la tabla "empresas" (se muestran igual, pero no se filtran bien):', faltantes);
+    }
+    avisoEmpresasRef.current = clave;
+  }, [empresas, ingresos]);
 
   // Dentro de un filtro = OR; entre filtros = AND
   const ingresosFiltrados = ingresosDelPeriodo.filter(i => {
     const matchPatente = !filterPatente || limpiarPatente(i.patente).includes(limpiarPatente(filterPatente));
-    const matchEmpresa = !filterEmpresas.length || filterEmpresas.some(s => empresaCoincide(i.nombre_empresa, s));
+    const matchEmpresa = !filterEmpresas.length || filterEmpresas.some(s => filtroEmpresas.coincide(i.nombre_empresa, s));
     const matchTipo = !filterTipos.length || filterTipos.includes(i.tipo_vehiculo);
     const matchEstado = !filterEstados.length || filterEstados.includes(i.estado);
     const matchServicio = !filterServicios.length || filterServicios.some(s => (i.servicios || []).includes(s));
@@ -1033,18 +1277,7 @@ export default function LuandiApp() {
 
 // ====== MÓDULO EDP (Fase 1: login admin + tarifario) ======
 
-const CLIENTES_TARIFARIO = [
-  'ATLAS COPCO',
-  'BARBARA RENT A CAR',
-  'CBS',
-  'COLORADO (SIGMA)',
-  'COMTECSA C-132',
-  'COMTECSA PEM 612',
-  'COMTECSA SITES',
-  'ECHEVERRIA IZQUIERDO',
-  'MAJOR DRILLING',
-  'SECHE'
-];
+// Los clientes del tarifario son las empresas de la tabla `empresas` (useEmpresas)
 
 // Categorías de cobro (distintas de TIPOS_VEHICULO; "Camion" va sin tilde)
 const CATEGORIAS_TARIFARIO = ['Camioneta', 'Camion', 'Minibus', 'Bus'];
@@ -1186,6 +1419,7 @@ function LoginAdminModal({ onSuccess, onClose }) {
 }
 
 function ModuloEDPView({ onCerrarSesion, showToast }) {
+  const { activas } = useEmpresas();
   const [seccion, setSeccion] = useState('tablero');
   // Tarifario cacheado: { 'CLIENTE|Categoria|Servicio': precio | null }
   const [tarifas, setTarifas] = useState({});
@@ -1241,7 +1475,7 @@ function ModuloEDPView({ onCerrarSesion, showToast }) {
         </div>
       ) : seccion === 'tablero' ? (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <ActionCard onClick={() => setSeccion('tarifario')} icon={<DollarSign size={28} />} title="Tarifario" description={`${conPrecio} precios cargados para ${CLIENTES_TARIFARIO.length} clientes`} primary />
+          <ActionCard onClick={() => setSeccion('tarifario')} icon={<DollarSign size={28} />} title="Tarifario" description={`${conPrecio} precios cargados · ${activas.length} clientes activos`} primary />
           <ActionCard onClick={() => showToast('Generar EDP: disponible en Fase 2', 'info')} icon={<FileText size={28} />} title="Generar EDP" description="Disponible en Fase 2" />
           <ActionCard onClick={() => showToast('Historial EDPs: disponible en Fase 2', 'info')} icon={<History size={28} />} title="Historial EDPs" description="Disponible en Fase 2" />
         </div>
@@ -1253,8 +1487,21 @@ function ModuloEDPView({ onCerrarSesion, showToast }) {
 }
 
 function TarifarioView({ tarifas, setTarifas, showToast }) {
-  const [cliente, setCliente] = useState(CLIENTES_TARIFARIO[0]);
+  const { empresas, activas, loading: cargandoEmpresas, error: errorEmpresas, recargar, reintentar } = useEmpresas();
+  const [mostrarDesactivados, setMostrarDesactivados] = useState(false);
+  const [cliente, setCliente] = useState('');
   const [mostrarDuplicar, setMostrarDuplicar] = useState(false);
+  const [clienteForm, setClienteForm] = useState(null); // null | { empresa: null (nuevo) | objeto (editar) }
+  const [confirmacion, setConfirmacion] = useState(null);
+
+  const lista = mostrarDesactivados ? empresas : activas;
+  const empresaSel = empresas.find(e => e.nombre === cliente);
+  const desactivadas = empresas.length - activas.length;
+
+  // Si el cliente seleccionado deja de estar en la lista (desactivado, eliminado), se elige el primero
+  useEffect(() => {
+    if (!lista.some(e => e.nombre === cliente)) setCliente(lista[0]?.nombre || '');
+  }, [lista, cliente]);
 
   const guardarPrecio = async (categoria, servicio, precio) => {
     const clave = claveTarifa(cliente, categoria, servicio);
@@ -1272,12 +1519,12 @@ function TarifarioView({ tarifas, setTarifas, showToast }) {
     showToast(`${cliente} · ${categoria}: ${precio == null ? 'precio eliminado' : formatCLP(precio) + ' guardado'}`);
   };
 
-  const duplicar = async (origen, destino) => {
-    const filas = [];
-    CATEGORIAS_TARIFARIO.forEach(cat => SERVICIOS_CATALOGO.forEach(s => {
-      filas.push({ cliente: destino, categoria_vehiculo: cat, servicio: s.nombre, precio_neto: tarifas[claveTarifa(origen, cat, s.nombre)] ?? null, fecha_actualizacion: new Date().toISOString() });
-    }));
-    const { error } = await supabase.from('clientes_tarifas').upsert(filas, { onConflict: 'cliente,categoria_vehiculo,servicio' });
+  const duplicar = async (origen, filas) => {
+    const ahora = new Date().toISOString();
+    const { error } = await supabase.from('clientes_tarifas').upsert(
+      filas.map(f => ({ ...f, fecha_actualizacion: ahora })),
+      { onConflict: 'cliente,categoria_vehiculo,servicio' }
+    );
     if (error) {
       showToast('Error al duplicar: ' + error.message, 'error');
       return;
@@ -1288,78 +1535,415 @@ function TarifarioView({ tarifas, setTarifas, showToast }) {
       return nuevo;
     });
     setMostrarDuplicar(false);
-    setCliente(destino);
-    showToast(`Precios de ${origen} copiados a ${destino}`);
+    showToast(`Copiados ${filas.length} precios desde ${origen}`);
+  };
+
+  const onClienteGuardado = (nombre, esNuevo, nombreAnterior) => {
+    // Si se renombró, las tarifas en caché pasan al nombre nuevo
+    if (nombreAnterior && nombreAnterior !== nombre) {
+      setTarifas(prev => {
+        const nuevo = {};
+        Object.entries(prev).forEach(([k, v]) => {
+          const [c, ...resto] = k.split('|');
+          nuevo[c === nombreAnterior ? [nombre, ...resto].join('|') : k] = v;
+        });
+        return nuevo;
+      });
+    }
+    setClienteForm(null);
+    setCliente(nombre);
+    showToast(esNuevo ? 'Cliente creado' : 'Cliente actualizado');
+  };
+
+  const cambiarActivo = (empresa, activo) => {
+    setConfirmacion({
+      title: activo ? '¿Reactivar cliente?' : '¿Desactivar cliente?',
+      message: activo
+        ? `${empresa.nombre} volverá a aparecer en Nuevo Ingreso, en el filtro del Historial y en el Tarifario.`
+        : `${empresa.nombre} dejará de aparecer en Nuevo Ingreso y en el filtro del Historial.\n\nSus ingresos y precios NO se eliminan. Puede reactivarlo cuando quiera (toggle "Mostrar desactivados").`,
+      confirmText: activo ? 'Reactivar' : 'Desactivar',
+      confirmColor: activo ? 'blue' : 'amber',
+      onCancel: () => setConfirmacion(null),
+      onConfirm: async () => {
+        setConfirmacion(null);
+        const { error } = await supabase.from('empresas').update({ activo, updated_at: new Date().toISOString() }).eq('id', empresa.id);
+        if (error) { showToast('Error: ' + error.message, 'error'); return; }
+        await recargar();
+        showToast(activo ? `${empresa.nombre} reactivado` : `${empresa.nombre} desactivado`, activo ? 'success' : 'info');
+      }
+    });
+  };
+
+  const eliminar = (empresa) => {
+    const nPrecios = Object.entries(tarifas).filter(([k, v]) => k.startsWith(empresa.nombre + '|') && v != null).length;
+    setConfirmacion({
+      title: '¿Eliminar cliente definitivamente?',
+      message: `Se eliminará ${empresa.nombre}${nPrecios ? ` y sus ${nPrecios} precios del tarifario` : ''}.\n\nNo tiene ingresos asociados. Esta acción no se puede deshacer.`,
+      confirmText: 'Eliminar',
+      confirmColor: 'red',
+      onCancel: () => setConfirmacion(null),
+      onConfirm: async () => {
+        setConfirmacion(null);
+        try {
+          // Se vuelve a verificar justo antes de borrar: nunca se elimina un cliente con ingresos
+          const n = await contarIngresosEmpresa(empresa.nombre);
+          if (n > 0) { showToast(`No se puede eliminar: ${empresa.nombre} tiene ${n} ingreso(s)`, 'error'); return; }
+          const { error: errT } = await supabase.from('clientes_tarifas').delete().eq('cliente', empresa.nombre);
+          if (errT) throw errT;
+          const { error: errE } = await supabase.from('empresas').delete().eq('id', empresa.id);
+          if (errE) throw errE;
+          setTarifas(prev => Object.fromEntries(Object.entries(prev).filter(([k]) => !k.startsWith(empresa.nombre + '|'))));
+          await recargar();
+          showToast(`${empresa.nombre} eliminado`, 'info');
+        } catch (e) {
+          showToast('Error al eliminar: ' + e.message, 'error');
+        }
+      }
+    });
   };
 
   const exportar = () => {
-    const filas = [['Categoría', 'Servicio', ...CLIENTES_TARIFARIO]];
+    const clientes = lista.map(e => e.nombre);
+    const filas = [['Categoría', 'Servicio', ...clientes]];
     CATEGORIAS_TARIFARIO.forEach(cat => SERVICIOS_CATALOGO.forEach(s => {
-      filas.push([cat, s.nombre, ...CLIENTES_TARIFARIO.map(c => tarifas[claveTarifa(c, cat, s.nombre)] ?? '')]);
+      filas.push([cat, s.nombre, ...clientes.map(c => tarifas[claveTarifa(c, cat, s.nombre)] ?? '')]);
     }));
     descargarCSV(filas, `Luandi_Tarifario_${new Date().toISOString().split('T')[0]}.csv`);
     showToast('Tarifario exportado');
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[240px_1fr] gap-4">
-      {mostrarDuplicar && <DuplicarTarifasModal clienteActual={cliente} onDuplicar={duplicar} onClose={() => setMostrarDuplicar(false)} />}
+    <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4">
+      {mostrarDuplicar && <DuplicarTarifasModal destino={cliente} tarifas={tarifas} onDuplicar={duplicar} onClose={() => setMostrarDuplicar(false)} />}
+      {clienteForm && <ClienteFormModal empresa={clienteForm.empresa} onGuardado={onClienteGuardado} onClose={() => setClienteForm(null)} />}
+      {confirmacion && <ConfirmModal {...confirmacion} />}
 
       <aside className="bg-white rounded-xl border border-slate-200 p-3 h-fit">
-        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide px-2 mb-2">Clientes</p>
-        <div className="flex flex-wrap lg:flex-col gap-1">
-          {CLIENTES_TARIFARIO.map(c => (
-            <button
-              key={c}
-              onClick={() => setCliente(c)}
-              className={`text-left px-3 py-2 rounded-lg text-sm cursor-pointer ${c === cliente ? 'bg-blue-700 text-white font-semibold' : 'text-slate-700 hover:bg-slate-100'}`}
-            >
-              {c}
-            </button>
-          ))}
-        </div>
-        <button onClick={() => setMostrarDuplicar(true)} className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50 cursor-pointer">
+        <button onClick={() => setClienteForm({ empresa: null })} className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 mb-3 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-sm font-medium cursor-pointer">
+          <UserPlus size={16} /> Agregar cliente nuevo
+        </button>
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide px-2 mb-2">Clientes ({lista.length})</p>
+
+        {cargandoEmpresas ? (
+          <div className="flex items-center gap-2 px-2 py-4 text-sm text-slate-500"><Loader2 size={16} className="animate-spin" /> Cargando clientes...</div>
+        ) : errorEmpresas ? (
+          <div className="px-2 py-3 text-sm text-red-700">
+            <p className="mb-2">No se pudieron cargar los clientes.</p>
+            <button onClick={reintentar} className="btn-secondary">Reintentar</button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-0.5">
+            {lista.map(e => (
+              <ItemCliente
+                key={e.id}
+                empresa={e}
+                seleccionado={e.nombre === cliente}
+                onSeleccionar={() => setCliente(e.nombre)}
+                onEditar={() => setClienteForm({ empresa: e })}
+                onCambiarActivo={(activo) => cambiarActivo(e, activo)}
+                onEliminar={() => eliminar(e)}
+              />
+            ))}
+          </div>
+        )}
+
+        <button onClick={() => setMostrarDuplicar(true)} disabled={!cliente} className="mt-3 w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
           <Copy size={16} /> Duplicar de otro cliente
         </button>
+
+        <label className="mt-3 pt-3 border-t border-slate-200 flex items-center justify-between gap-2 px-1 cursor-pointer">
+          <span className="text-sm text-slate-600">Mostrar desactivados{desactivadas ? ` (${desactivadas})` : ''}</span>
+          <input type="checkbox" className="sr-only peer" checked={mostrarDesactivados} onChange={e => setMostrarDesactivados(e.target.checked)} />
+          <span className="relative w-9 h-5 rounded-full bg-slate-300 peer-checked:bg-blue-600 transition-colors after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4" />
+        </label>
       </aside>
 
       <section className="bg-white rounded-xl border border-slate-200 overflow-hidden min-w-0">
         <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h3 className="font-bold text-slate-900">{cliente}</h3>
-            <p className="text-xs text-slate-500">Precios netos (sin IVA). Se guardan al salir de la celda.</p>
+            <h3 className={`font-bold flex items-center gap-2 flex-wrap ${empresaSel && !empresaSel.activo ? 'text-slate-400' : 'text-slate-900'}`}>
+              {cliente || 'Sin clientes'}
+              {empresaSel && !empresaSel.activo && <span className="text-[11px] font-semibold uppercase px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">Desactivado</span>}
+              {empresaSel && empresaSel.activo && empresaSel.visible_en_nuevo_ingreso === false && <span className="text-[11px] font-semibold uppercase px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Oculto en Nuevo Ingreso</span>}
+            </h3>
+            <p className="text-xs text-slate-500">
+              {empresaSel?.rut ? `RUT ${empresaSel.rut} · ` : ''}Precios netos (sin IVA). Se guardan al salir de la celda.
+            </p>
           </div>
           <button onClick={exportar} className="btn-secondary inline-flex items-center gap-2 cursor-pointer">
             <Download size={16} /> Exportar tarifario
           </button>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-slate-600">
-                <th className="text-left font-semibold px-4 py-2 min-w-[220px]">Servicio</th>
-                {CATEGORIAS_TARIFARIO.map(cat => <th key={cat} className="text-right font-semibold px-2 py-2 min-w-[110px]">{cat}</th>)}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {SERVICIOS_CATALOGO.map(s => (
-                <tr key={s.nombre} className="hover:bg-slate-50">
-                  <td className="px-4 py-1.5 text-slate-800">{s.nombre}</td>
-                  {CATEGORIAS_TARIFARIO.map(cat => (
-                    <td key={cat} className="px-2 py-1.5">
-                      <PrecioCelda
-                        key={claveTarifa(cliente, cat, s.nombre)}
-                        valor={tarifas[claveTarifa(cliente, cat, s.nombre)] ?? null}
-                        onGuardar={(precio) => guardarPrecio(cat, s.nombre, precio)}
-                      />
-                    </td>
-                  ))}
+        {cliente ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-slate-600">
+                  <th className="text-left font-semibold px-4 py-2 min-w-[220px]">Servicio</th>
+                  {CATEGORIAS_TARIFARIO.map(cat => <th key={cat} className="text-right font-semibold px-2 py-2 min-w-[110px]">{cat}</th>)}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {SERVICIOS_CATALOGO.map(s => (
+                  <tr key={s.nombre} className="hover:bg-slate-50">
+                    <td className="px-4 py-1.5 text-slate-800">{s.nombre}</td>
+                    {CATEGORIAS_TARIFARIO.map(cat => (
+                      <td key={cat} className="px-2 py-1.5">
+                        <PrecioCelda
+                          key={claveTarifa(cliente, cat, s.nombre)}
+                          valor={tarifas[claveTarifa(cliente, cat, s.nombre)] ?? null}
+                          onGuardar={(precio) => guardarPrecio(cat, s.nombre, precio)}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="px-4 py-10 text-center text-sm text-slate-500">No hay clientes para mostrar.</p>
+        )}
       </section>
+    </div>
+  );
+}
+
+// Cliente del sidebar con menú ⋮ (editar / desactivar / reactivar / eliminar)
+function ItemCliente({ empresa, seleccionado, onSeleccionar, onEditar, onCambiarActivo, onEliminar }) {
+  const [menuAbierto, setMenuAbierto] = useState(false);
+  const [conteo, setConteo] = useState(null); // null = verificando, -1 = error
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!menuAbierto) return;
+    const cerrarFuera = (e) => { if (ref.current && !ref.current.contains(e.target)) setMenuAbierto(false); };
+    document.addEventListener('mousedown', cerrarFuera);
+    document.addEventListener('touchstart', cerrarFuera);
+    return () => {
+      document.removeEventListener('mousedown', cerrarFuera);
+      document.removeEventListener('touchstart', cerrarFuera);
+    };
+  }, [menuAbierto]);
+
+  // "Eliminar definitivamente" solo se ofrece si el cliente tiene 0 ingresos
+  useEffect(() => {
+    if (!menuAbierto) return;
+    let vigente = true;
+    setConteo(null);
+    contarIngresosEmpresa(empresa.nombre).then(n => { if (vigente) setConteo(n); }).catch(() => { if (vigente) setConteo(-1); });
+    return () => { vigente = false; };
+  }, [menuAbierto, empresa.nombre]);
+
+  const accion = (fn) => () => { setMenuAbierto(false); fn(); };
+
+  const estiloNombre = seleccionado
+    ? (empresa.activo ? 'bg-blue-700 text-white font-semibold' : 'bg-slate-400 text-white font-semibold')
+    : (empresa.activo ? 'text-slate-700 hover:bg-slate-100' : 'text-slate-400 hover:bg-slate-50');
+
+  return (
+    <div ref={ref} className="relative">
+      <button onClick={onSeleccionar} className={`w-full text-left pl-3 pr-9 py-2 rounded-lg text-sm cursor-pointer ${estiloNombre}`}>
+        <span className="block truncate">{empresa.nombre}</span>
+        {!empresa.activo && <span className="block text-[10px] uppercase tracking-wide">Desactivado</span>}
+        {empresa.activo && empresa.visible_en_nuevo_ingreso === false && (
+          <span className={`flex items-center gap-1 text-[10px] uppercase tracking-wide ${seleccionado ? 'text-blue-100' : 'text-amber-700'}`}><EyeOff size={10} /> Oculto en Nuevo Ingreso</span>
+        )}
+      </button>
+      <button
+        onClick={() => setMenuAbierto(m => !m)}
+        title="Opciones"
+        className={`absolute right-1 top-1.5 p-1.5 rounded-md cursor-pointer ${seleccionado ? 'text-white hover:bg-white/20' : 'text-slate-400 hover:bg-slate-200 hover:text-slate-700'}`}
+      >
+        <MoreVertical size={16} />
+      </button>
+      {menuAbierto && (
+        <div className="absolute right-0 top-full z-30 mt-1 w-60 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-sm">
+          <button onClick={accion(onEditar)} className="w-full flex items-center gap-2 px-3 py-2 text-left text-slate-700 hover:bg-slate-50 cursor-pointer"><Edit2 size={14} /> Editar datos</button>
+          {empresa.activo ? (
+            <button onClick={accion(() => onCambiarActivo(false))} className="w-full flex items-center gap-2 px-3 py-2 text-left text-amber-700 hover:bg-amber-50 cursor-pointer"><EyeOff size={14} /> Desactivar cliente</button>
+          ) : (
+            <button onClick={accion(() => onCambiarActivo(true))} className="w-full flex items-center gap-2 px-3 py-2 text-left text-green-700 hover:bg-green-50 cursor-pointer"><RotateCcw size={14} /> Reactivar cliente</button>
+          )}
+          <div className="border-t border-slate-100 my-1" />
+          {conteo === null ? (
+            <p className="flex items-center gap-2 px-3 py-2 text-xs text-slate-400"><Loader2 size={12} className="animate-spin" /> Verificando ingresos...</p>
+          ) : conteo === 0 ? (
+            <button onClick={accion(onEliminar)} className="w-full flex items-center gap-2 px-3 py-2 text-left text-red-600 hover:bg-red-50 cursor-pointer"><Trash2 size={14} /> Eliminar definitivamente</button>
+          ) : conteo > 0 ? (
+            <p className="px-3 py-2 text-xs text-slate-400">{conteo} {conteo === 1 ? 'ingreso asociado' : 'ingresos asociados'} · no se puede eliminar</p>
+          ) : (
+            <p className="px-3 py-2 text-xs text-red-500">No se pudieron verificar los ingresos</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Crear (empresa = null) o editar un cliente
+function ClienteFormModal({ empresa, onGuardado, onClose }) {
+  const { empresas, recargar } = useEmpresas();
+  const esNuevo = !empresa;
+  const [form, setForm] = useState(() => ({
+    nombre: empresa?.nombre || '',
+    rut: empresa?.rut || '',
+    contacto_nombre: empresa?.contacto_nombre || '',
+    contacto_email: empresa?.contacto_email || '',
+    contacto_telefono: empresa?.contacto_telefono || '',
+    visible_en_nuevo_ingreso: empresa ? empresa.visible_en_nuevo_ingreso !== false : true
+  }));
+  const [errores, setErrores] = useState({});
+  const [errorGeneral, setErrorGeneral] = useState('');
+  const [guardando, setGuardando] = useState(false);
+  // El nombre solo se puede cambiar si el cliente tiene 0 ingresos (si no, sus ingresos dejarían de calzar)
+  const [conteoIngresos, setConteoIngresos] = useState(esNuevo ? 0 : null); // null = verificando, -1 = error
+
+  useEffect(() => {
+    if (esNuevo) return;
+    let vigente = true;
+    contarIngresosEmpresa(empresa.nombre).then(n => { if (vigente) setConteoIngresos(n); }).catch(() => { if (vigente) setConteoIngresos(-1); });
+    return () => { vigente = false; };
+  }, []);
+
+  const nombreBloqueado = !esNuevo && conteoIngresos !== 0;
+
+  const set = (campo, valor) => {
+    setForm(f => ({ ...f, [campo]: valor }));
+    setErrores(e => ({ ...e, [campo]: '' }));
+  };
+
+  const validar = () => {
+    const e = {};
+    if (!nombreBloqueado) {
+      const nombre = normalizarNombreCliente(form.nombre);
+      const duplicado = empresas.find(x => x.id !== empresa?.id && sinTildes(x.nombre) === sinTildes(nombre));
+      if (!nombre) e.nombre = 'El nombre es obligatorio.';
+      else if (duplicado) e.nombre = `Ya existe un cliente con ese nombre: ${duplicado.nombre}`;
+    }
+    if (form.rut.trim()) {
+      const errorRut = validarRut(form.rut);
+      if (errorRut) e.rut = errorRut;
+    }
+    if (form.contacto_email.trim() && !EMAIL_REGEX.test(form.contacto_email.trim())) e.contacto_email = 'Formato de email inválido (ej: nombre@empresa.cl).';
+    setErrores(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const guardar = async (ev) => {
+    ev.preventDefault();
+    if (guardando || !validar()) return;
+    setGuardando(true);
+    setErrorGeneral('');
+    const nombreFinal = nombreBloqueado ? empresa.nombre : normalizarNombreCliente(form.nombre);
+    const datos = {
+      rut: form.rut.trim() ? formatearRut(form.rut) : null,
+      contacto_nombre: form.contacto_nombre.trim() || null,
+      contacto_email: form.contacto_email.trim().toLowerCase() || null,
+      contacto_telefono: form.contacto_telefono.trim() || null,
+      visible_en_nuevo_ingreso: form.visible_en_nuevo_ingreso
+    };
+    try {
+      if (esNuevo) {
+        const { error } = await supabase.from('empresas').insert({ nombre: nombreFinal, ...datos });
+        if (error) throw error;
+      } else {
+        const renombrado = nombreFinal !== empresa.nombre;
+        if (renombrado) {
+          // Se vuelve a verificar justo antes de renombrar
+          const n = await contarIngresosEmpresa(empresa.nombre);
+          if (n > 0) {
+            setConteoIngresos(n);
+            throw new Error(`este cliente ya tiene ${n} ingreso(s), el nombre no se puede cambiar.`);
+          }
+        }
+        const { error } = await supabase.from('empresas')
+          .update({ ...datos, ...(renombrado ? { nombre: nombreFinal } : {}), updated_at: new Date().toISOString() })
+          .eq('id', empresa.id);
+        if (error) throw error;
+        if (renombrado) {
+          const { error: errorTarifas } = await supabase.from('clientes_tarifas').update({ cliente: nombreFinal }).eq('cliente', empresa.nombre);
+          if (errorTarifas) throw errorTarifas;
+        }
+      }
+      await recargar();
+      onGuardado(nombreFinal, esNuevo, empresa?.nombre);
+    } catch (err) {
+      setErrorGeneral(err.code === '23505' ? 'Ya existe un cliente con ese nombre.' : 'No se pudo guardar: ' + err.message);
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const claseInput = (campo) => `input ${errores[campo] ? 'border-red-400 focus:ring-red-500' : ''}`;
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <form onSubmit={guardar} className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <h3 className="font-bold text-slate-900 text-lg mb-4 flex items-center gap-2">
+          {esNuevo ? <><UserPlus size={20} className="text-blue-700" /> Agregar cliente nuevo</> : <><Edit2 size={20} className="text-blue-700" /> Editar cliente</>}
+        </h3>
+
+        <div className="space-y-3">
+          <Field label="Nombre *">
+            <input
+              type="text"
+              className={`${claseInput('nombre')} ${nombreBloqueado ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : ''}`}
+              value={form.nombre}
+              disabled={nombreBloqueado}
+              autoFocus={esNuevo}
+              placeholder="Ej: MINERA ESCONDIDA"
+              onChange={e => set('nombre', e.target.value.toUpperCase())}
+            />
+            {errores.nombre && <p className="text-xs text-red-600 mt-1">{errores.nombre}</p>}
+            {!esNuevo && conteoIngresos === null && <p className="text-xs text-slate-500 mt-1 flex items-center gap-1"><Loader2 size={12} className="animate-spin" /> Verificando ingresos asociados...</p>}
+            {!esNuevo && conteoIngresos > 0 && <p className="text-xs text-slate-500 mt-1 flex items-center gap-1"><Lock size={12} /> Tiene {conteoIngresos} {conteoIngresos === 1 ? 'ingreso' : 'ingresos'}: el nombre no se puede cambiar.</p>}
+            {!esNuevo && conteoIngresos === -1 && <p className="text-xs text-red-600 mt-1">No se pudieron verificar los ingresos; el nombre queda bloqueado.</p>}
+          </Field>
+
+          <Field label="RUT">
+            <input
+              type="text"
+              className={claseInput('rut')}
+              value={form.rut}
+              placeholder="77.123.456-9"
+              onChange={e => set('rut', e.target.value)}
+              onBlur={() => { if (form.rut.trim() && !validarRut(form.rut)) set('rut', formatearRut(form.rut)); }}
+            />
+            {errores.rut && <p className="text-xs text-red-600 mt-1">{errores.rut}</p>}
+          </Field>
+
+          <Field label="Contacto nombre">
+            <input type="text" className="input" value={form.contacto_nombre} onChange={e => set('contacto_nombre', e.target.value)} />
+          </Field>
+
+          <Field label="Contacto email">
+            <input type="email" className={claseInput('contacto_email')} value={form.contacto_email} placeholder="nombre@empresa.cl" onChange={e => set('contacto_email', e.target.value)} />
+            {errores.contacto_email && <p className="text-xs text-red-600 mt-1">{errores.contacto_email}</p>}
+          </Field>
+
+          <Field label="Contacto teléfono">
+            <input type="tel" className="input" value={form.contacto_telefono} placeholder="+56 9 1234 5678" onChange={e => set('contacto_telefono', e.target.value)} />
+          </Field>
+
+          <label className="flex items-start gap-2.5 pt-1 cursor-pointer">
+            <input type="checkbox" className="w-4 h-4 mt-0.5 rounded text-blue-600" checked={form.visible_en_nuevo_ingreso} onChange={e => set('visible_en_nuevo_ingreso', e.target.checked)} />
+            <span className="text-sm text-slate-700">
+              Visible en Nuevo Ingreso
+              <span className="block text-xs text-slate-500">Si se desmarca, solo aparece en Historial y Tarifario.</span>
+            </span>
+          </label>
+        </div>
+
+        {errorGeneral && <p className="text-sm text-red-600 mt-4">{errorGeneral}</p>}
+
+        <div className="flex gap-2 mt-5">
+          <button type="button" onClick={onClose} className="flex-1 btn-secondary justify-center">Cancelar</button>
+          <button type="submit" disabled={guardando || (!esNuevo && conteoIngresos === null)} className="flex-1 btn-primary justify-center disabled:opacity-50 disabled:cursor-not-allowed">
+            {guardando ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />} Guardar
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -1389,43 +1973,87 @@ function PrecioCelda({ valor, onGuardar }) {
   );
 }
 
-function DuplicarTarifasModal({ clienteActual, onDuplicar, onClose }) {
-  const [origen, setOrigen] = useState(CLIENTES_TARIFARIO.find(c => c !== clienteActual));
-  const [destino, setDestino] = useState(clienteActual);
-  const [confirmando, setConfirmando] = useState(false);
+const esServicioComtecsa = (servicio) => servicio.includes('(Comtecsa)');
+
+// Fusión: solo rellena celdas VACÍAS del destino con los precios del origen.
+// Nunca sobrescribe un precio que el destino ya tenga (protege el trabajo manual).
+function calcularFilasDuplicado(tarifas, origen, destino, incluirComtecsa) {
+  const filas = [];
+  CATEGORIAS_TARIFARIO.forEach(cat => SERVICIOS_CATALOGO.forEach(s => {
+    if (!incluirComtecsa && esServicioComtecsa(s.nombre)) return;
+    const precioOrigen = tarifas[claveTarifa(origen, cat, s.nombre)];
+    if (precioOrigen == null) return;
+    if (tarifas[claveTarifa(destino, cat, s.nombre)] != null) return;
+    filas.push({ cliente: destino, categoria_vehiculo: cat, servicio: s.nombre, precio_neto: precioOrigen });
+  }));
+  return filas;
+}
+
+function DuplicarTarifasModal({ destino, tarifas, onDuplicar, onClose }) {
+  const origenes = useMemo(() => {
+    const conPrecio = new Set();
+    Object.entries(tarifas).forEach(([k, v]) => { if (v != null) conPrecio.add(k.split('|')[0]); });
+    return [...conPrecio].filter(c => c !== destino).sort((a, b) => a.localeCompare(b, 'es'));
+  }, [tarifas, destino]);
+
+  const [origen, setOrigen] = useState(origenes[0] || '');
+  const [incluirComtecsa, setIncluirComtecsa] = useState(false);
   const [copiando, setCopiando] = useState(false);
 
-  if (confirmando) {
-    return (
-      <ConfirmModal
-        title="¿Duplicar precios?"
-        message={`Se copiarán los ${CATEGORIAS_TARIFARIO.length * SERVICIOS_CATALOGO.length} precios de ${origen} a ${destino}.\n\nLos precios actuales de ${destino} se sobrescribirán.`}
-        confirmText={copiando ? 'Copiando...' : 'Duplicar'}
-        confirmColor="amber"
-        onConfirm={async () => { if (copiando) return; setCopiando(true); await onDuplicar(origen, destino); setCopiando(false); }}
-        onCancel={() => setConfirmando(false)}
-      />
-    );
-  }
+  const filas = useMemo(
+    () => (origen ? calcularFilasDuplicado(tarifas, origen, destino, incluirComtecsa) : []),
+    [tarifas, origen, destino, incluirComtecsa]
+  );
+
+  const confirmar = async () => {
+    if (!filas.length || copiando) return;
+    setCopiando(true);
+    await onDuplicar(origen, filas);
+    setCopiando(false);
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
-        <h3 className="font-bold text-slate-900 text-lg mb-4 flex items-center gap-2"><Copy size={20} className="text-blue-700" /> Duplicar tarifario</h3>
-        <Field label="Copiar precios desde">
-          <select className="input" value={origen} onChange={e => setOrigen(e.target.value)}>
-            {CLIENTES_TARIFARIO.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </Field>
-        <Field label="Hacia" className="mt-3">
-          <select className="input" value={destino} onChange={e => setDestino(e.target.value)}>
-            {CLIENTES_TARIFARIO.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </Field>
-        {origen === destino && <p className="text-sm text-amber-700 mt-2">Elija clientes distintos.</p>}
+        <h3 className="font-bold text-slate-900 text-lg mb-1 flex items-center gap-2"><Copy size={20} className="text-blue-700" /> Duplicar precios</h3>
+        <p className="text-sm text-slate-600 mb-4">Destino: <span className="font-semibold text-slate-900">{destino}</span></p>
+
+        {origenes.length === 0 ? (
+          <p className="text-sm text-slate-600">No hay otros clientes con precios cargados para copiar.</p>
+        ) : (
+          <>
+            <Field label="Copiar precios desde">
+              <select className="input" value={origen} onChange={e => setOrigen(e.target.value)}>
+                {origenes.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </Field>
+
+            <div className="mt-3 flex gap-2 p-3 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-900">
+              <Info size={16} className="flex-shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                {!incluirComtecsa && <p>Se copiarán todos los precios EXCEPTO los servicios específicos de Comtecsa (Lavado Full Diurno/Nocturno Comtecsa).</p>}
+                <p>Solo se rellenan las celdas vacías de {destino}. Los precios que ya tiene no se modifican.</p>
+              </div>
+            </div>
+
+            <label className="mt-3 flex items-center gap-2.5 cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 rounded text-blue-600" checked={incluirComtecsa} onChange={e => setIncluirComtecsa(e.target.checked)} />
+              <span className="text-sm text-slate-700">Copiar también servicios específicos Comtecsa</span>
+            </label>
+
+            <p className={`mt-4 text-sm font-medium ${filas.length ? 'text-slate-800' : 'text-amber-700'}`}>
+              {filas.length
+                ? `Se copiarán ${filas.length} ${filas.length === 1 ? 'precio' : 'precios'}.`
+                : `${destino} ya tiene precio en todas las celdas que ${origen} tiene cargadas. No hay nada que copiar.`}
+            </p>
+          </>
+        )}
+
         <div className="flex gap-2 mt-5">
           <button onClick={onClose} className="flex-1 btn-secondary justify-center">Cancelar</button>
-          <button onClick={() => setConfirmando(true)} disabled={origen === destino} className="flex-1 btn-primary justify-center disabled:opacity-50 disabled:cursor-not-allowed">Continuar</button>
+          <button onClick={confirmar} disabled={!filas.length || copiando} className="flex-1 btn-primary justify-center disabled:opacity-50 disabled:cursor-not-allowed">
+            {copiando ? <Loader2 size={16} className="animate-spin" /> : <Copy size={16} />} Duplicar
+          </button>
         </div>
       </div>
     </div>
@@ -1553,6 +2181,8 @@ function EstadoBadge({ estado }) {
 }
 
 function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }) {
+  const { paraNuevoIngreso, loading: cargandoEmpresas, error: errorEmpresas, reintentar: reintentarEmpresas } = useEmpresas();
+  const opcionesEmpresaIngreso = useMemo(() => paraNuevoIngreso.map(e => e.nombre), [paraNuevoIngreso]);
   const [step, setStep] = useState(1);
   const esEntregado = ingreso && ingreso.estado === 'entregado';
   const [data, setData] = useState(ingreso || {
@@ -1711,7 +2341,18 @@ function FormularioIngreso({ ingreso, onGuardar, onCancelar, saving, showAlert }
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
           <SectionTitle icon={<Building2 size={18} />} title="Datos de Ingreso" />
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <SelectConOtro label="Nombre Empresa *" valor={data.nombre_empresa} opciones={EMPRESAS_CATALOGO} onChange={(v) => update('nombre_empresa', v)} placeholder="Nombre de la empresa" />
+            <SelectBuscable
+              label="Nombre Empresa *"
+              valor={data.nombre_empresa}
+              opciones={opcionesEmpresaIngreso}
+              onChange={(v) => update('nombre_empresa', v)}
+              placeholder="Buscar empresa..."
+              loading={cargandoEmpresas}
+              error={errorEmpresas}
+              onReintentar={reintentarEmpresas}
+              mensajeSinResultados="¿No ves tu empresa? Pide al admin que la agregue desde el módulo EDP."
+              avisoFueraDeLista={(v) => `«${v}» no está disponible para nuevos ingresos (desactivada u oculta). Se mantiene el valor actual de este registro.`}
+            />
             <Field label="N° Patente *">
               <input type="text" value={data.patente} onChange={e => update('patente', limpiarPatente(e.target.value))} className="input" placeholder="Ej: BCDF12 (sin guion)" maxLength={6} />
               {limpiarPatente(data.patente).length === 6 && (
