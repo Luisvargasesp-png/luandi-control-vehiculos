@@ -30,7 +30,8 @@ luandi-control-vehiculos/
 ├── .env.local                # VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY (local, no se sube)
 ├── CLAUDE.local.md           # datos sensibles (contraseña admin EDP) — local, no se sube
 ├── sql/
-│   └── edp_fase1.sql         # tablas del módulo EDP + tarifario inicial (ya ejecutado)
+│   ├── edp_fase1.sql         # tablas del módulo EDP + tarifario inicial (ya ejecutado)
+│   └── fase15b_empresas.sql  # tabla empresas + 24 empresas iniciales (ya ejecutado)
 └── src/
     ├── main.jsx
     ├── index.css             # clases @layer: .input, .btn-primary, .btn-secondary
@@ -99,10 +100,39 @@ Tabla principal `ingresos`. Columnas actuales:
 
 Tabla secundaria `contador` con registro único `id=1, valor=7150` (manejado por la función RPC).
 
+**Carga de ingresos:** Supabase entrega máximo 1.000 filas por consulta (aunque se pida `.limit(5000)`). `cargarIngresos()` pagina con `.range()` en bloques de 1.000 hasta traer todo (1.704 al 15 nov 2026). No volver a una sola consulta.
+
+**Backup:** `ingresos_backup_pre_fase15` = copia de los ingresos antes de la limpieza de nombres de empresa (Fase 1.5-A, 13-14 nov 2026). Antes de cualquier UPDATE/DELETE masivo sobre `ingresos`, confirmar que existe.
+
+### Tabla `empresas` (Fase 1.5-B, creada con `sql/fase15b_empresas.sql`)
+
+Reemplaza al antiguo array `EMPRESAS_CATALOGO` (ya no existe en el código).
+
+- Columnas: `id`, `nombre` TEXT UNIQUE NOT NULL, `rut`, `contacto_nombre`, `contacto_email`, `contacto_telefono`, `activo` (default TRUE), `visible_en_nuevo_ingreso` (default TRUE), `created_at`, `updated_at`.
+- Índices: nombre, activo. RLS abierto. Realtime habilitado.
+- **No hay FK con `ingresos`:** el vínculo es por texto (`ingresos.nombre_empresa = empresas.nombre`), exacto, sensible a mayúsculas, tildes y espacios. Por eso:
+  - El nombre de un cliente **solo se puede cambiar si tiene 0 ingresos** (se verifica con `SELECT COUNT` antes de habilitar el campo y otra vez justo antes de guardar). Al renombrar se actualiza también `clientes_tarifas.cliente`.
+  - "Eliminar definitivamente" solo existe para clientes con 0 ingresos; borra la empresa y sus filas en `clientes_tarifas`. **Nunca toca `ingresos`.**
+  - Nombres nuevos se normalizan: MAYÚSCULAS, sin espacios dobles ni caracteres invisibles (caso ORBIT). Duplicados se detectan ignorando mayúsculas y tildes ("SAN JOSE" = "SAN JOSÉ").
+  - Si un ingreso tiene un `nombre_empresa` que no está en la tabla, la app muestra `console.warn` y el ingreso se ve normal (solo cae en "Otro" del filtro).
+- Al 15 nov 2026: 24 empresas = 21 con ingresos + ARAMARK, JEJ, VILLA TRAVEL (clientes potenciales, sin ingresos). `COMTECSA (histórico)` tiene `visible_en_nuevo_ingreso = FALSE` (110 ingresos huérfanos antiguos; solo Historial/Tarifario).
+
 ## Catálogos
 
-### EMPRESAS (16, orden alfabético)
-ARAMARK, ATLAS COPCO, BARBARA RENT A CAR, BESALCO, CBS, COLORADO (SIGMA), COMTECSA C-132, COMTECSA PEM 612, COMTECSA SITES, ECHEVERRIA IZQUIERDO, JEJ, MAJOR DRILLING, MINING TAG, SECHE, TOLOZA, VILLA TRAVEL
+### EMPRESAS — dinámicas (tabla `empresas`, ver Schema)
+
+Ya no son un catálogo en el código. Se cargan con `EmpresasProvider` (React Context, envuelve toda la app) y se leen con el hook `useEmpresas()`:
+
+| Campo del hook | Qué es | Dónde se usa |
+|---|---|---|
+| `empresas` | todas, incluye desactivadas | Tarifario con "Mostrar desactivados" ON |
+| `activas` | `activo = true` | filtro del Historial, Tarifario, Exportar tarifario |
+| `paraNuevoIngreso` | `activo = true` AND `visible_en_nuevo_ingreso = true` | dropdown Empresa de Nuevo Ingreso |
+| `loading`, `error`, `recargar()`, `reintentar()` | estados y recarga | spinner / mensaje de error con "Reintentar" |
+
+Se recargan tras cada alta/edición/desactivación y también por Realtime (otros dispositivos ven el cambio al instante).
+
+Se agregan, editan y desactivan **solo desde el Tarifario del módulo EDP** (admin). Ver "Gestión de clientes" en la sección Módulo EDP.
 
 ### MARCAS → MODELOS
 ```
@@ -174,7 +204,7 @@ Cambio de Faroles Delanteros   [cantidad: unidades]
 
 4 pasos (5 si está editando un ya entregado):
 
-1. **Vehículo** — Empresa (dropdown + Otro), patente, tipo, marca (dropdown + Otro), modelo (dropdown dependiente de marca + Otro), kilometraje
+1. **Vehículo** — Empresa (`SelectBuscable`: dropdown con búsqueda, **sin "Otro" ni texto libre**; si no hay resultados muestra "¿No ves tu empresa? Pide al admin que la agregue desde el módulo EDP."; al editar un ingreso cuya empresa está desactivada u oculta, conserva el valor y muestra un aviso ámbar), patente, tipo, marca (dropdown + Otro), modelo (dropdown dependiente de marca + Otro), kilometraje
 2. **Servicios** — Catálogo de servicios + Catálogo de equipamiento (con cantidades inline donde aplica) + campos "Otros" libres
 3. **Recepción** — Fechas, personas, firma del cliente (con excepción "sin firma" + motivo), personal Luandi que recibe
 4. **Observaciones** — Texto libre + resumen del ingreso
@@ -199,7 +229,10 @@ Cambio de Faroles Delanteros   [cantidad: unidades]
 ## Historial
 
 - **Agrupación por período (mes/año):** vista por defecto = mes actual. Botón "Cambiar período" abre modal `SelectorPeriodo` agrupado por año.
-- **Filtros:** patente, empresa (texto libre), estado (todos | en_proceso | entregado).
+- **Filtros (multi-select, `MultiSelect`):** patente (texto), empresa, tipo, estado, servicios, equipamiento. Dentro de un filtro = OR; entre filtros = AND.
+- **Filtro de empresa (`crearFiltroEmpresas(activas)`):** solo empresas activas.
+  - Las que comparten primera palabra forman una **familia** con opción propia que agrupa a todas: `COMTECSA` (C-132 + PEM 612 + SITES + histórico) y `SECHE` (SECHE + SECHE CHIQUI, que es una flota/contrato dentro de SECHE). Cada miembro también se puede elegir solo (grupo "Variantes y Otros").
+  - "Otro" = ingresos cuya empresa no calza con ninguna activa (p. ej. empresas desactivadas).
 - **Botones principales con contador dinámico:**
   - `[PDF respaldos (N)]` → PDF con TODOS los filtrados en formato individual completo, ordenados por n_control asc.
   - `[Excel mes (N)]` → CSV con los filtrados.
@@ -252,7 +285,7 @@ Se abre en nueva pestaña y se dispara `window.print()` automáticamente.
 
 Módulo separado de los flujos de ingreso/historial, protegido por contraseña admin. Se entra desde la tarjeta "Módulo EDP" en el inicio (`view === 'edp'`).
 
-**Estado:** Fase 1 lista (13 nov 2026): login admin + tarifario. Fase 2 pendiente: generar EDP e historial de EDPs (las tarjetas muestran "Disponible en Fase 2").
+**Estado:** Fase 1 lista (13 nov 2026): login admin + tarifario. Fase 1.5-B lista (15 nov 2026): gestión dinámica de clientes. Fase 2 pendiente: generar EDP e historial de EDPs (las tarjetas muestran "Disponible en Fase 2").
 
 ### Tablas Supabase (creadas con `sql/edp_fase1.sql`)
 
@@ -272,14 +305,28 @@ Módulo separado de los flujos de ingreso/historial, protegido por contraseña a
 
 ### Tarifario (`TarifarioView`)
 
-- **Clientes (10, `CLIENTES_TARIFARIO`):** ATLAS COPCO, BARBARA RENT A CAR, CBS, COLORADO (SIGMA), COMTECSA C-132, COMTECSA PEM 612, COMTECSA SITES, ECHEVERRIA IZQUIERDO, MAJOR DRILLING, SECHE. Mismos nombres que `EMPRESAS_CATALOGO` (necesario para cruzar con ingresos en Fase 2).
+- **Clientes:** las empresas de la tabla `empresas` (`useEmpresas().activas`, o todas con el toggle). Ya no existe `CLIENTES_TARIFARIO`. Las empresas sin tarifa cargada aparecen igual, con celdas vacías; el primer precio que se escribe crea la fila con `upsert`. Hoy tienen precios cargados los 10 clientes originales del Excel.
 - **Categorías (`CATEGORIAS_TARIFARIO`):** Camioneta, Camion (**sin tilde**, decisión de Luis), Minibus, Bus. Distintas de `TIPOS_VEHICULO`: en Fase 2 hay que mapear "Camión" → "Camion" y definir qué pasa con Automóvil/SUV/Furgón/Maquinaria (sin tarifa).
 - **Servicios:** los 14 de `SERVICIOS_CATALOGO`. "Recarga de Adblue" no venía en el Excel de precios → NULL (probablemente se cobra por litro; definir en Fase 2).
 - Se carga una vez al entrar al módulo (`ModuloEDPView`) y queda cacheado en estado local como mapa `'CLIENTE|Categoria|Servicio' → precio`.
 - Cada celda (`PrecioCelda`) guarda con `upsert` al perder foco o con Enter; toast verde. Celda vacía = NULL. Si falla, revierte el valor.
-- "Duplicar de otro cliente" (`DuplicarTarifasModal`): copia los 56 precios de origen a destino, **sobrescribe** el destino, con confirmación.
+- "Duplicar de otro cliente" (`DuplicarTarifasModal` + `calcularFilasDuplicado`): destino = cliente seleccionado; origen = cualquier cliente con al menos un precio.
+  - **Fusión (decisión de Luis, opción A2):** solo **rellena celdas vacías** del destino con precios del origen. **Nunca sobrescribe** un precio que el destino ya tenga (protege precios puestos a mano) y nunca copia vacíos. Si algún día se necesita "copia total", sería un botón nuevo.
+  - Por defecto **excluye** los servicios cuyo nombre contiene `(Comtecsa)` (Lavado Full Diurno/Nocturno). Checkbox "Copiar también servicios específicos Comtecsa" (desmarcado por defecto).
+  - El modal muestra antes cuántos precios va a copiar. Toast: "Copiados N precios desde X".
 - "Exportar tarifario": CSV `Luandi_Tarifario_YYYY-MM-DD.csv` con formato matriz (filas categoría + servicio, columnas clientes), igual que el Excel original de precios.
 - El Excel fuente (`listado precio por cliente.xlsx`) está en `.gitignore`.
+
+### Gestión de clientes (Tarifario, Fase 1.5-B)
+
+- **"+ Agregar cliente nuevo"** (arriba del sidebar) → `ClienteFormModal`. Al guardar: INSERT en `empresas`, recarga en toda la app, toast "Cliente creado" y abre el cliente en el tarifario.
+- Campos: Nombre * (MAYÚSCULAS automáticas, único), RUT, contacto nombre, email, teléfono, checkbox **"Visible en Nuevo Ingreso"** (marcado por defecto).
+- **RUT** (opcional): `validarRut` = módulo 11 (dígitos de derecha a izquierda × 2,3,4,5,6,7,2,3…; DV = 11 − suma mod 11; 11→"0", 10→"K"), cuerpo de 7-8 dígitos, y **rechaza RUT con todos los dígitos iguales** (11.111.111-1, 22.222.222-2…: ficticios aunque cumplan módulo 11; decisión de Luis). Se guarda formateado con `formatearRut` (`77.123.456-9`). Helpers: `limpiarRut`, `calcularDvRut`, `validarRut`, `formatearRut`.
+- **Email** (opcional): validación de formato; se guarda en minúsculas.
+- **Menú ⋮ por cliente** (`ItemCliente`): Editar datos · Desactivar cliente / Reactivar cliente · Eliminar definitivamente (solo si tiene 0 ingresos; al abrir el menú se cuentan en Supabase).
+- **Editar:** el Nombre queda bloqueado (🔒) si el cliente tiene ≥1 ingreso; RUT, contactos y visibilidad se editan siempre.
+- **Desactivar** = soft delete (`activo = false`), con confirmación. Desaparece de Nuevo Ingreso y del filtro del Historial; sus ingresos y precios se conservan. Toggle **"Mostrar desactivados"** (OFF por defecto, al final del sidebar) los muestra en gris.
+- Indicadores en el sidebar: "Desactivado" (gris) y "Oculto en Nuevo Ingreso" (ámbar).
 
 ### Pendientes acordados con Luis (13 nov 2026)
 
@@ -299,6 +346,7 @@ Luis es dueño de la lógica de negocio. Claude Code debe:
 6. **Para probar localmente:** `npm run dev` → http://localhost:5173
 7. **Para build:** `npm run build`
 8. **Si `npm run dev` o `npm run build` se quedan pegados en "transforming...":** iCloud (carpeta Documents) mandó archivos de `node_modules` a la nube. Solución: mover/borrar `node_modules` y correr `npm install`.
+9. **Si git falla con `bad object refs/heads/main 2`:** son copias de conflicto que crea iCloud dentro de `.git/refs` (archivos con " 2" en el nombre). Verificar que apuntan a commits ya incluidos en `main` (`git merge-base --is-ancestor <sha> main`) y sacarlas de `.git/refs`.
 
 ## Pendiente al cerrar la sesión del chat Claude.ai (26 oct 2026)
 
